@@ -1,0 +1,275 @@
+{
+  "themeCount": 45,
+  "themes": [
+    {
+      "id": "angelCloud",
+      "name": "Angel cloud",
+      "description": "pale blue glass, rounded panels, soft webcore",
+      "file": "themes/builtin/angelCloud.theme.json"
+    },
+    {
+      "id": "violetNight",
+      "name": "Violet night",
+      "description": "dark cyber inventory",
+      "file": "themes/builtin/violetNight.theme.json"
+    },
+    {
+      "id": "graphiteLab",
+      "name": "Graphite lab",
+      "description": "neutral grey UI for longer work sessions",
+      "file": "themes/builtin/graphiteLab.theme.json"
+    },
+    {
+      "id": "terminalGreen",
+      "name": "Terminal green",
+      "description": "compact black-green inventory terminal",
+      "file": "themes/builtin/terminalGreen.theme.json"
+    },
+    {
+      "id": "pearlWindow",
+      "name": "Pearl window",
+      "description": "white plastic shell with soft blue shadows",
+      "file": "themes/builtin/pearlWindow.theme.json"
+    },
+    {
+      "id": "frostMint",
+      "name": "Frost mint",
+      "description": "mint glass and low-contrast cold UI",
+      "file": "themes/builtin/frostMint.theme.json"
+    },
+    {
+      "id": "sakuraGlass",
+      "name": "Sakura glass",
+      "description": "soft pink window UI",
+      "file": "themes/builtin/sakuraGlass.theme.json"
+    },
+    {
+      "id": "lavenderMilk",
+      "name": "Lavender milk",
+      "description": "washed lavender and blue-grey text",
+      "file": "themes/builtin/lavenderMilk.theme.json"
+    },
+    {
+      "id": "aeroBlue",
+      "name": "Aero blue",
+      "description": "transparent blue desktop shell",
+      "file": "themes/builtin/aeroBlue.theme.json"
+    },
+    {
+      "id": "memoryBlue",
+      "name": "Memory card blue",
+      "description": "deep blue plastic and pale labels",
+      "file": "themes/builtin/memoryBlue.theme.json"
+    },
+    {
+      "id": "pcbGreen",
+      "name": "PCB green",
+      "description": "green solder mask with copper accents",
+      "file": "themes/builtin/pcbGreen.theme.json"
+    },
+    {
+      "id": "fr4Purple",
+      "name": "FR4 purple",
+      "description": "purple PCB mask and cyan silkscreen",
+      "file": "themes/builtin/fr4Purple.theme.json"
+    },
+    {
+      "id": "blackSolder",
+      "name": "Black solder",
+      "description": "black solder mask and gold pads",
+      "file": "themes/builtin/blackSolder.theme.json"
+    },
+    {
+      "id": "datasheetPaper",
+      "name": "Datasheet paper",
+      "description": "low-ink technical document style",
+      "file": "themes/builtin/datasheetPaper.theme.json"
+    },
+    {
+      "id": "coffeeBench",
+      "name": "Coffee bench",
+      "description": "warm beige workbench theme",
+      "file": "themes/builtin/coffeeBench.theme.json"
+    },
+    {
+      "id": "amberDos",
+      "name": "Amber DOS",
+      "description": "black amber service terminal",
+      "file": "themes/builtin/amberDos.theme.json"
+    },
+    {
+      "id": "orangeCrt",
+      "name": "Orange CRT",
+      "description": "dark warm CRT and phosphor orange",
+      "file": "themes/builtin/orangeCrt.theme.json"
+    },
+    {
+      "id": "redAlert",
+      "name": "Red alert",
+      "description": "critical dark red dashboard",
+      "file": "themes/builtin/redAlert.theme.json"
+    },
+    {
+      "id": "deepSea",
+      "name": "Deep sea",
+      "description": "dark teal and dim blue panels",
+      "file": "themes/builtin/deepSea.theme.json"
+    },
+    {
+      "id": "cyberIce",
+      "name": "Cyber ice",
+      "description": "black glass with cyan-white edges",
+      "file": "themes/builtin/cyberIce.theme.json"
+    },
+    {
+      "id": "neonMagenta",
+      "name": "Neon magenta",
+      "description": "dark nightclub magenta UI",
+      "file": "themes/builtin/neonMagenta.theme.json"
+    },
+    {
+      "id": "minimalEink",
+      "name": "Minimal e-ink",
+      "description": "almost monochrome high-readability theme",
+      "file": "themes/builtin/minimalEink.theme.json"
+    },
+    {
+      "id": "candyWeb",
+      "name": "Candy web",
+      "description": "pastel candy cyan and pink",
+      "file": "themes/builtin/candyWeb.theme.json"
+    },
+    {
+      "id": "cobaltService",
+      "name": "Cobalt service",
+      "description": "industrial blue service tool",
+      "file": "themes/builtin/cobaltService.theme.json"
+    },
+    {
+      "id": "amberCrt",
+      "name": "Amber CRT",
+      "description": "black and amber hardware terminal",
+      "file": "themes/builtin/amberCrt.theme.json"
+    },
+    {
+      "id": "blackGlass",
+      "name": "Black glass",
+      "description": "low saturation transparent black",
+      "file": "themes/builtin/blackGlass.theme.json"
+    },
+    {
+      "id": "bloodMoon",
+      "name": "Blood moon",
+      "description": "dark red laboratory mode",
+      "file": "themes/builtin/bloodMoon.theme.json"
+    },
+    {
+      "id": "blueberryIce",
+      "name": "Blueberry ice",
+      "description": "cold blue-violet bright theme",
+      "file": "themes/builtin/blueberryIce.theme.json"
+    },
+    {
+      "id": "ceramicLab",
+      "name": "Ceramic lab",
+      "description": "clean off-white lab panels",
+      "file": "themes/builtin/ceramicLab.theme.json"
+    },
+    {
+      "id": "classicBlue",
+      "name": "Classic blue",
+      "description": "old desktop dialog blue-grey",
+      "file": "themes/builtin/classicBlue.theme.json"
+    },
+    {
+      "id": "cyberLime",
+      "name": "Cyber lime",
+      "description": "neon lime and purple debug screen",
+      "file": "themes/builtin/cyberLime.theme.json"
+    },
+    {
+      "id": "glassSnow",
+      "name": "Glass snow",
+      "description": "white frosted interface with pale blue shadows",
+      "file": "themes/builtin/glassSnow.theme.json"
+    },
+    {
+      "id": "magentaSynth",
+      "name": "Magenta synth",
+      "description": "black magenta synthwave setup",
+      "file": "themes/builtin/magentaSynth.theme.json"
+    },
+    {
+      "id": "matrixBlue",
+      "name": "Matrix blue",
+      "description": "cyan grid with electric blue text",
+      "file": "themes/builtin/matrixBlue.theme.json"
+    },
+    {
+      "id": "midnightChrome",
+      "name": "Midnight chrome",
+      "description": "dark blue chrome panels",
+      "file": "themes/builtin/midnightChrome.theme.json"
+    },
+    {
+      "id": "mintCream",
+      "name": "Mint cream",
+      "description": "green-white soft inventory desk",
+      "file": "themes/builtin/mintCream.theme.json"
+    },
+    {
+      "id": "monochromeInk",
+      "name": "Monochrome ink",
+      "description": "sharp black and white catalog mode",
+      "file": "themes/builtin/monochromeInk.theme.json"
+    },
+    {
+      "id": "nordFrost",
+      "name": "Nord frost",
+      "description": "cool blue-grey night mode",
+      "file": "themes/builtin/nordFrost.theme.json"
+    },
+    {
+      "id": "paperLedger",
+      "name": "Paper ledger",
+      "description": "paper catalog for component bins",
+      "file": "themes/builtin/paperLedger.theme.json"
+    },
+    {
+      "id": "peachSoda",
+      "name": "Peach soda",
+      "description": "warm orange-pink translucent panels",
+      "file": "themes/builtin/peachSoda.theme.json"
+    },
+    {
+      "id": "roseTerminal",
+      "name": "Rose terminal",
+      "description": "red-pink terminal with soft contrast",
+      "file": "themes/builtin/roseTerminal.theme.json"
+    },
+    {
+      "id": "sakuraDesk",
+      "name": "Sakura desk",
+      "description": "pale pink desktop stationery",
+      "file": "themes/builtin/sakuraDesk.theme.json"
+    },
+    {
+      "id": "solarCircuit",
+      "name": "Solar circuit",
+      "description": "warm dark solarized electronics UI",
+      "file": "themes/builtin/solarCircuit.theme.json"
+    },
+    {
+      "id": "transparentGhost",
+      "name": "Transparent ghost",
+      "description": "very pale translucent ghost UI",
+      "file": "themes/builtin/transparentGhost.theme.json"
+    },
+    {
+      "id": "vaporDusk",
+      "name": "Vapor dusk",
+      "description": "purple sunset vapor panels",
+      "file": "themes/builtin/vaporDusk.theme.json"
+    }
+  ]
+}

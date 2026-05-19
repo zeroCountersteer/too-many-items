@@ -1,7 +1,7 @@
 {
-  "id": "customSoftBlue",
-  "name": "Custom soft blue",
-  "description": "copy this file, edit variables, import in Settings",
+  "id": "angelCloud",
+  "name": "Angel cloud",
+  "description": "pale blue glass, rounded panels, soft webcore",
   "variables": {
     "--bg-base": "#dcecff",
     "--bg-soft": "#f7fbff",
