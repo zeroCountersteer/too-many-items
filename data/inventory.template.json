@@ -1,0 +1,63 @@
+{
+  "schemaVersion": 1,
+  "meta": {
+    "app": "too-many-items",
+    "createdAt": "2026-05-19T12:50:47Z",
+    "updatedAt": "2026-05-19T12:50:47Z"
+  },
+  "categories": [
+    {
+      "id": 1,
+      "name": "resistor"
+    },
+    {
+      "id": 2,
+      "name": "capacitor"
+    },
+    {
+      "id": 3,
+      "name": "inductor"
+    },
+    {
+      "id": 4,
+      "name": "ic"
+    },
+    {
+      "id": 5,
+      "name": "keyswitch"
+    },
+    {
+      "id": 6,
+      "name": "connector"
+    },
+    {
+      "id": 7,
+      "name": "diode"
+    },
+    {
+      "id": 8,
+      "name": "transistor"
+    },
+    {
+      "id": 9,
+      "name": "module"
+    },
+    {
+      "id": 10,
+      "name": "mechanical"
+    },
+    {
+      "id": 11,
+      "name": "other"
+    }
+  ],
+  "locations": [],
+  "parts": [],
+  "resistorSpecs": [],
+  "capacitorSpecs": [],
+  "inductorSpecs": [],
+  "icSpecs": [],
+  "keyswitchSpecs": [],
+  "stock": [],
+  "attributes": []
+}

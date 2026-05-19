@@ -1,0 +1,96 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://example.invalid/too-many-items/inventory.schema.json",
+  "title": "Too Many Items inventory",
+  "type": "object",
+  "required": [
+    "schemaVersion",
+    "meta",
+    "categories",
+    "locations",
+    "parts",
+    "stock"
+  ],
+  "properties": {
+    "schemaVersion": { "type": "integer", "minimum": 1 },
+    "meta": {
+      "type": "object",
+      "properties": {
+        "app": { "type": "string" },
+        "createdAt": { "type": "string" },
+        "updatedAt": { "type": "string" }
+      }
+    },
+    "categories": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["id", "name"],
+        "properties": {
+          "id": { "type": "integer" },
+          "name": { "type": "string" }
+        }
+      }
+    },
+    "locations": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["id", "name"],
+        "properties": {
+          "id": { "type": "integer" },
+          "name": { "type": "string" },
+          "parentId": { "type": ["integer", "null"] },
+          "notes": { "type": ["string", "null"] }
+        }
+      }
+    },
+    "parts": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["id", "categoryId", "name"],
+        "properties": {
+          "id": { "type": "integer" },
+          "categoryId": { "type": "integer" },
+          "name": { "type": "string" },
+          "manufacturer": { "type": ["string", "null"] },
+          "mpn": { "type": ["string", "null"] },
+          "footprint": { "type": ["string", "null"] },
+          "package": { "type": ["string", "null"] },
+          "description": { "type": ["string", "null"] },
+          "datasheetUrl": { "type": ["string", "null"] },
+          "notes": { "type": ["string", "null"] },
+          "createdAt": { "type": "string" },
+          "updatedAt": { "type": ["string", "null"] }
+        }
+      }
+    },
+    "stock": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["id", "partId", "quantity"],
+        "properties": {
+          "id": { "type": "integer" },
+          "partId": { "type": "integer" },
+          "locationId": { "type": ["integer", "null"] },
+          "quantity": { "type": "integer", "minimum": 0 },
+          "minQuantity": { "type": "integer", "minimum": 0 },
+          "source": { "type": ["string", "null"] },
+          "orderNumber": { "type": ["string", "null"] },
+          "unitPrice": { "type": ["number", "null"] },
+          "currency": { "type": ["string", "null"] },
+          "dateAdded": { "type": "string" },
+          "notes": { "type": ["string", "null"] }
+        }
+      }
+    },
+    "resistorSpecs": { "type": "array" },
+    "capacitorSpecs": { "type": "array" },
+    "inductorSpecs": { "type": "array" },
+    "icSpecs": { "type": "array" },
+    "keyswitchSpecs": { "type": "array" },
+    "attributes": { "type": "array" }
+  }
+}

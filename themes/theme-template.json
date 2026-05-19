@@ -1,0 +1,18 @@
+{
+  "id": "custom_soft_lab",
+  "name": "Custom soft lab",
+  "description": "Example theme. Import it from Settings.",
+  "variables": {
+    "--bg-base": "#dcecff",
+    "--bg-soft": "#f7fbff",
+    "--panel-bg": "rgba(255, 255, 255, 0.82)",
+    "--panel-bg-strong": "rgba(255, 255, 255, 0.95)",
+    "--panel-muted": "rgba(244, 249, 255, 0.72)",
+    "--panel-border": "rgba(166, 178, 196, 0.68)",
+    "--text": "#77859a",
+    "--text-strong": "#5c6f8c",
+    "--accent": "#8fc9ff",
+    "--accent-2": "#c6b7ff",
+    "--accent-3": "#ff94d4"
+  }
+}

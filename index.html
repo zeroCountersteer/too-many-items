@@ -1,0 +1,95 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Too Many Items // Inventory</title>
+  <meta name="description" content="Static GitHub-backed SQLite inventory for electronic components." />
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body class="moving-bg" data-app-ready="false">
+  <div class="ambient" aria-hidden="true">
+    <span class="cloud cloud-a"></span>
+    <span class="cloud cloud-b"></span>
+    <span class="cloud cloud-c"></span>
+    <span class="grid-film"></span>
+  </div>
+
+  <div class="app-shell">
+    <aside class="navi-card" aria-label="Navigation">
+      <div class="navi-head">
+        <div class="orb" aria-hidden="true"><span></span></div>
+        <div>
+          <p class="eyebrow">nAVI</p>
+          <h1>Too<br />Many<br />Items</h1>
+        </div>
+      </div>
+
+      <nav class="navi-menu" id="navMenu">
+        <button type="button" class="nav-button" data-view="parts">HOME / INVENTORY</button>
+        <button type="button" class="nav-button" data-view="locations">LOCATIONS / MAP</button>
+        <button type="button" class="nav-button" data-view="database">DATABASE</button>
+        <button type="button" class="nav-button" data-view="settings">SETTINGS</button>
+      </nav>
+
+      <div class="tiny-panel connection-panel">
+        <p class="panel-title">database</p>
+        <p id="navDbName">inventory.db</p>
+        <p id="navDbState" class="muted">initializing</p>
+      </div>
+    </aside>
+
+    <main class="main-window" aria-live="polite">
+      <header class="window-chrome">
+        <div>
+          <p class="path-line" id="pathLine">INVENTORY / PARTS</p>
+          <h2 id="windowTitle">electronic components</h2>
+        </div>
+        <div class="chrome-actions" id="chromeActions"></div>
+      </header>
+
+      <section class="notice-line" id="noticeLine">loading database</section>
+
+      <section class="metrics-grid" id="metricsGrid" aria-label="Inventory summary"></section>
+
+      <section class="content-card" id="viewPanel"></section>
+    </main>
+
+    <aside class="side-stack" aria-label="Inventory stats">
+      <section class="poster-card">
+        <div class="poster-orbit" aria-hidden="true"></div>
+        <div>
+          <p class="eyebrow">component archive</p>
+          <strong id="archiveName">inventory.db</strong>
+          <span id="archiveSubline">not connected</span>
+        </div>
+      </section>
+
+      <section class="stats-card">
+        <div class="card-topline">
+          <span class="close-dot" aria-hidden="true">×</span>
+          <h3>STATS</h3>
+        </div>
+        <div id="rightStats" class="right-stats"></div>
+        <div class="timecode">
+          <p>created : <span id="createdDate">--</span></p>
+          <p>updated : <span id="updatedDate">--</span></p>
+          <p>source : <span id="dbSourceText">--</span></p>
+        </div>
+      </section>
+    </aside>
+  </div>
+
+  <input id="dbFileInput" type="file" accept=".db,.sqlite,.sqlite3,application/octet-stream,application/vnd.sqlite3" hidden />
+  <input id="jsonFileInput" type="file" accept="application/json,.json" hidden />
+  <input id="themeFileInput" type="file" accept="application/json,.json" hidden />
+  <div id="modalRoot"></div>
+
+  <noscript>
+    <div class="noscript">This inventory app requires JavaScript. It does not use a backend.</div>
+  </noscript>
+
+  <script src="https://cdn.jsdelivr.net/npm/sql.js@1.10.3/dist/sql-wasm.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>
