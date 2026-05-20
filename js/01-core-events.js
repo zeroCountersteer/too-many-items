@@ -7,6 +7,10 @@ const state = {
   activeView: normalizeView(localStorage.getItem(STORAGE.activeView)),
   query: "",
   categoryFilter: "all",
+  stockFilter: "all",
+  packageFilter: "",
+  sortKey: "category",
+  sortDir: "asc",
   githubSha: localStorage.getItem(STORAGE.githubSha) || "",
   githubConfig: loadJsonFromStorage(STORAGE.githubConfig, {
     owner: "",
@@ -182,6 +186,13 @@ function handleInput(event) {
   if (target.matches("[data-search]")) {
     state.query = target.value;
     renderPartsViewOnly();
+    return;
+  }
+
+  if (target.matches("[data-package-filter]")) {
+    state.packageFilter = target.value;
+    renderPartsViewOnly();
+    return;
   }
 
   if (target.matches("[data-theme-var]")) {
@@ -194,6 +205,24 @@ function handleChange(event) {
 
   if (target.matches("[data-category-filter]")) {
     state.categoryFilter = target.value;
+    renderPartsViewOnly();
+    return;
+  }
+
+  if (target.matches("[data-stock-filter]")) {
+    state.stockFilter = target.value;
+    renderPartsViewOnly();
+    return;
+  }
+
+  if (target.matches("[data-sort-key]")) {
+    state.sortKey = target.value;
+    renderPartsViewOnly();
+    return;
+  }
+
+  if (target.matches("[data-sort-dir]")) {
+    state.sortDir = target.value;
     renderPartsViewOnly();
     return;
   }

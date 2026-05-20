@@ -1,12 +1,28 @@
 "use strict";
 
 function filteredParts() {
-  const query = state.query.trim().toLowerCase();
-  return state.inventory.parts
+  const query = String(state.query || "").trim().toLowerCase();
+  const packageQuery = String(state.packageFilter || "").trim().toLowerCase();
+  const stockFilter = state.stockFilter || "all";
+
+  const filtered = state.inventory.parts
     .filter((part) => state.categoryFilter === "all" || String(part.categoryId) === String(state.categoryFilter))
+    .filter((part) => {
+      if (!packageQuery) return true;
+      return [part.package, part.footprint].filter(Boolean).join(" ").toLowerCase().includes(packageQuery);
+    })
+    .filter((part) => {
+      const stock = stockSummary(part.id);
+      if (stockFilter === "in-stock") return stock.total > 0;
+      if (stockFilter === "zero") return stock.total <= 0;
+      if (stockFilter === "low") return stock.min > 0 && stock.total <= stock.min;
+      if (stockFilter === "no-location") return state.inventory.stock.some((row) => row.partId === part.id && !row.locationId);
+      return true;
+    })
     .filter((part) => {
       if (!query) return true;
       const haystack = [
+        part.id,
         part.name,
         part.manufacturer,
         part.mpn,
@@ -19,8 +35,27 @@ function filteredParts() {
         stockSummary(part.id).locations
       ].filter(Boolean).join(" ").toLowerCase();
       return haystack.includes(query);
-    })
-    .sort((a, b) => getCategoryName(a.categoryId).localeCompare(getCategoryName(b.categoryId)) || a.name.localeCompare(b.name));
+    });
+
+  const direction = state.sortDir === "desc" ? -1 : 1;
+  const sortKey = state.sortKey || "category";
+  const collator = new Intl.Collator(undefined, { numeric: true, sensitivity: "base" });
+  const compareText = (a, b) => collator.compare(String(a || ""), String(b || ""));
+  const compareNumber = (a, b) => Number(a || 0) - Number(b || 0);
+
+  return filtered.sort((a, b) => {
+    const stockA = stockSummary(a.id);
+    const stockB = stockSummary(b.id);
+    let result = 0;
+    if (sortKey === "id") result = compareNumber(a.id, b.id);
+    else if (sortKey === "name") result = compareText(a.name, b.name);
+    else if (sortKey === "category") result = compareText(getCategoryName(a.categoryId), getCategoryName(b.categoryId)) || compareText(a.name, b.name);
+    else if (sortKey === "package") result = compareText(a.package || a.footprint, b.package || b.footprint) || compareText(a.name, b.name);
+    else if (sortKey === "quantity") result = compareNumber(stockA.total, stockB.total) || compareText(a.name, b.name);
+    else if (sortKey === "location") result = compareText(stockA.locations, stockB.locations) || compareText(a.name, b.name);
+    else result = compareText(a.name, b.name);
+    return result * direction;
+  });
 }
 
 function stockSummary(partId) {

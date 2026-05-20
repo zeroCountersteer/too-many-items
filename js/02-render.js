@@ -48,7 +48,6 @@ function renderHeader() {
 
   const actions = [];
   if (state.activeView === "parts") {
-    actions.push(`<button type="button" data-action="export-db">export .db</button>`);
     actions.push(`<button type="button" data-action="set-view" data-target-view="add">bulk add</button>`);
     actions.push(`<button type="button" class="primary-button" data-action="open-add-part">+ add part</button>`);
   } else if (state.activeView === "add") {
@@ -64,9 +63,15 @@ function renderHeader() {
   $("#chromeActions").innerHTML = actions.join("");
 
   const cfg = state.githubConfig;
-  const archive = cfg.repo ? `${cfg.owner}/${cfg.repo}` : state.dbFileName || "inventory.db";
-  $("#archiveName").textContent = archive;
-  $("#archiveSubline").textContent = cfg.repo ? `${cfg.branch || "main"}:${cfg.path || BUNDLED_DB_PATH}` : state.dbSource;
+  const archiveName = $("#archiveName");
+  const archiveSubline = $("#archiveSubline");
+  if (archiveName) {
+    const archive = cfg.repo ? `${cfg.owner}/${cfg.repo}` : state.dbFileName || "inventory.db";
+    archiveName.textContent = archive;
+  }
+  if (archiveSubline) {
+    archiveSubline.textContent = cfg.repo ? `${cfg.branch || "main"}:${cfg.path || BUNDLED_DB_PATH}` : state.dbSource;
+  }
 
   const notice = $("#noticeLine");
   if (state.sqliteError) {
@@ -95,6 +100,8 @@ function metricHtml(value, label) {
 }
 
 function renderRightStats() {
+  const rightStats = $("#rightStats");
+  if (!rightStats) return;
   const categoryCounts = state.inventory.categories
     .map((category) => ({ name: category.name, count: state.inventory.parts.filter((part) => part.categoryId === category.id).length }))
     .filter((entry) => entry.count > 0)
@@ -110,10 +117,10 @@ function renderRightStats() {
     ? categoryCounts.map((entry) => `<div class="right-stat"><span>${escapeHtml(entry.name)}</span><strong>${entry.count}</strong></div>`)
     : [`<div class="right-stat"><span>parts</span><strong>0</strong></div>`];
 
-  $("#rightStats").innerHTML = databaseRows.concat(categoryRows).join("");
-  $("#createdDate").textContent = formatDate(state.inventory.meta?.createdAt);
-  $("#updatedDate").textContent = formatDate(state.inventory.meta?.updatedAt);
-  $("#dbSourceText").textContent = state.dbSource || "local";
+  rightStats.innerHTML = databaseRows.concat(categoryRows).join("");
+  if ($("#createdDate")) $("#createdDate").textContent = formatDate(state.inventory.meta?.createdAt);
+  if ($("#updatedDate")) $("#updatedDate").textContent = formatDate(state.inventory.meta?.updatedAt);
+  if ($("#dbSourceText")) $("#dbSourceText").textContent = state.dbSource || "local";
 }
 
 function renderPartsView() {
@@ -122,13 +129,21 @@ function renderPartsView() {
   const categoryOptions = [`<option value="all">all categories</option>`]
     .concat(categories.map((category) => `<option value="${category.id}" ${String(category.id) === String(state.categoryFilter) ? "selected" : ""}>${escapeHtml(category.name)}</option>`))
     .join("");
+  const sortOptions = [
+    ["category", "sort: category"],
+    ["name", "sort: name"],
+    ["quantity", "sort: quantity"],
+    ["package", "sort: package"],
+    ["location", "sort: location"],
+    ["id", "sort: id"]
+  ].map(([value, label]) => `<option value="${value}" ${state.sortKey === value ? "selected" : ""}>${label}</option>`).join("");
 
   const table = filtered.length
     ? renderPartsTable(filtered)
-    : `<div class="empty-state">
+    : `<div class="empty-state compact">
         <div>
-          <h3>inventory is empty</h3>
-          <p>Add a real component, open an existing SQLite database, or load <code>data/inventory.db</code> from GitHub.</p>
+          <h3>no matching parts</h3>
+          <p>Clear filters, add a component, or open an existing SQLite database.</p>
           <div class="inline-actions">
             <button type="button" class="primary-button" data-action="open-add-part">+ add part</button>
             <button type="button" class="ghost-button" data-action="import-db">open .db</button>
@@ -137,18 +152,28 @@ function renderPartsView() {
       </div>`;
 
   return `
-    <div class="view-head">
-      <h3 class="view-title"><span>information</span> / parts overview</h3>
-      <div class="tool-row">
+    <div class="view-head compact-head">
+      <h3 class="view-title"><span>parts</span> / ${filtered.length} shown</h3>
+      <div class="tool-row compact-tools">
         <button type="button" data-action="add-category">+ category</button>
-        <button type="button" data-action="set-view" data-target-view="add">bulk add</button>
-        <button type="button" class="primary-button" data-action="open-add-part">+ add part</button>
       </div>
     </div>
-    <div class="toolbar-grid">
-      <input type="search" data-search value="${escapeAttr(state.query)}" placeholder="search: 0603, tps25751, x7r..." />
+    <div class="toolbar-grid parts-toolbar">
+      <input type="search" data-search value="${escapeAttr(state.query)}" placeholder="search name, mpn, value, location..." />
       <select data-category-filter>${categoryOptions}</select>
-      <button type="button" class="ghost-button" data-action="export-db">export .db</button>
+      <input type="search" data-package-filter value="${escapeAttr(state.packageFilter || "")}" placeholder="package/footprint" />
+      <select data-stock-filter>
+        <option value="all" ${state.stockFilter === "all" ? "selected" : ""}>stock: all</option>
+        <option value="in-stock" ${state.stockFilter === "in-stock" ? "selected" : ""}>stock: in stock</option>
+        <option value="low" ${state.stockFilter === "low" ? "selected" : ""}>stock: low</option>
+        <option value="zero" ${state.stockFilter === "zero" ? "selected" : ""}>stock: zero</option>
+        <option value="no-location" ${state.stockFilter === "no-location" ? "selected" : ""}>stock: no location</option>
+      </select>
+      <select data-sort-key>${sortOptions}</select>
+      <select data-sort-dir>
+        <option value="asc" ${state.sortDir !== "desc" ? "selected" : ""}>asc</option>
+        <option value="desc" ${state.sortDir === "desc" ? "selected" : ""}>desc</option>
+      </select>
     </div>
     ${table}
   `;
@@ -167,14 +192,13 @@ function renderPartsTable(parts) {
         <td>
           <span class="part-name">${escapeHtml(part.name)}</span>
           <span class="subtext">${escapeHtml(mpn)}</span>
-          ${spec ? `<span class="subtext">${escapeHtml(spec)}</span>` : ""}
+          ${spec ? `<span class="subtext part-spec-line">${escapeHtml(spec)}</span>` : ""}
         </td>
         <td><span class="badge">${escapeHtml(category)}</span></td>
-        <td>${escapeHtml(part.package || "")}</td>
-        <td>${escapeHtml(part.footprint || "")}</td>
-        <td><span class="${low ? "qty-low" : "qty-ok"}">${stock.total}</span>${stock.min ? ` / min ${stock.min}` : ""}</td>
+        <td><span class="mono-cell">${escapeHtml(part.package || "")}</span><span class="subtext">${escapeHtml(part.footprint || "")}</span></td>
+        <td><span class="${low ? "qty-low" : "qty-ok"}">${stock.total}</span>${stock.min ? `<span class="subtext">min ${stock.min}</span>` : ""}</td>
         <td>${escapeHtml(stock.locations || "-")}</td>
-        <td><button type="button" class="ghost-button" data-action="open-edit-part" data-id="${part.id}">edit</button></td>
+        <td><button type="button" class="ghost-button small-button" data-action="open-edit-part" data-id="${part.id}">edit</button></td>
       </tr>`;
   }).join("");
 
@@ -185,8 +209,7 @@ function renderPartsTable(parts) {
           <th>ID</th>
           <th>Part</th>
           <th>Category</th>
-          <th>Package</th>
-          <th>Footprint</th>
+          <th>Pkg / footprint</th>
           <th>Qty</th>
           <th>Location</th>
           <th></th>
@@ -283,11 +306,8 @@ function renderLocationsView() {
     : `<div class="empty-state"><div><h3>no storage map yet</h3><p>Add drawers, boxes, trays, cells, or shelves. Parts can reference them from stock rows.</p><button type="button" class="primary-button" data-action="open-add-location">+ add location</button></div></div>`;
 
   return `
-    <div class="view-head">
+    <div class="view-head compact-head">
       <h3 class="view-title"><span>storage_map</span> / locations</h3>
-      <div class="tool-row">
-        <button type="button" class="primary-button" data-action="open-add-location">+ add location</button>
-      </div>
     </div>
     ${cards}
   `;
