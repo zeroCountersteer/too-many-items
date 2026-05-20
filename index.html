@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>Inventory v16 // Repository</title>
+  <title>Inventory v17 // Repository</title>
   <meta name="description" content="Static GitHub-backed SQLite inventory." />
   <link rel="stylesheet" href="style.css" />
 </head>
@@ -69,13 +69,14 @@
   </noscript>
 
   <script src="https://cdn.jsdelivr.net/npm/sql.js@1.10.3/dist/sql-wasm.js"></script>
-  <script src="js/00-config.js?v=16"></script>
-  <script src="js/06-inventory-model.js?v=16"></script>
-  <script src="js/05-database.js?v=16"></script>
-  <script src="js/07-theme-utils.js?v=16"></script>
-  <script src="js/02-render.js?v=16"></script>
-  <script src="js/04-editors.js?v=16"></script>
-  <script src="js/03-bulk-and-api.js?v=16"></script>
-  <script src="js/01-core-events.js?v=16"></script>
+  <script src="js/00-config.js?v=17"></script>
+  <script src="js/06-inventory-model.js?v=17"></script>
+  <script src="js/05-database.js?v=17"></script>
+  <script src="js/07-theme-utils.js?v=17"></script>
+  <script src="js/02-render.js?v=17"></script>
+  <script src="js/04-editors.js?v=17"></script>
+  <script src="js/03-bulk-and-api.js?v=17"></script>
+  <script src="js/01-core-events.js?v=17"></script>
+  <script>if ("serviceWorker" in navigator) { window.addEventListener("load", () => navigator.serviceWorker.register("./sw.js").catch(console.warn)); }</script>
 </body>
 </html>

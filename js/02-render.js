@@ -121,8 +121,9 @@ function renderPartsView() {
     ["id", "sort: id"]
   ].map(([value, label]) => `<option value="${value}" ${state.sortKey === value ? "selected" : ""}>${label}</option>`).join("");
 
+  const visibleParts = filtered.slice(0, Number(state.renderLimit || PERFORMANCE_DEFAULTS.renderLimit));
   const table = filtered.length
-    ? renderPartsTable(filtered)
+    ? renderPartsTable(visibleParts)
     : `<div class="empty-state compact">
         <div>
           <h3>no matching parts</h3>
@@ -162,6 +163,7 @@ function renderPartsView() {
       </select>
     </div>
     ${table}
+    ${filtered.length > visibleParts.length ? `<div class="database-actions table-more"><button type="button" data-action="show-more-parts">show more ${Math.min(PERFORMANCE_DEFAULTS.renderLimit, filtered.length - visibleParts.length)}</button><button type="button" data-action="reset-render-limit">reset limit</button><span>${visibleParts.length} / ${filtered.length} rendered</span></div>` : ""}
   `;
 }
 
@@ -446,7 +448,7 @@ function renderSettingsView() {
 
 
 
-/* v16 overrides */
+/* v17 overrides */
 
 function renderNavigation() {
   $$('[data-view]').forEach((button) => {
@@ -511,8 +513,9 @@ function renderPartsView() {
     return `<label class="check-chip"><input type="checkbox" data-column-toggle value="${escapeAttr(key)}" ${checked ? "checked" : ""} ${disabled ? "disabled" : ""} />${escapeHtml(label || "edit")}</label>`;
   }).join("");
 
+  const visibleParts = filtered.slice(0, Number(state.renderLimit || PERFORMANCE_DEFAULTS.renderLimit));
   const table = filtered.length
-    ? renderPartsTable(filtered)
+    ? renderPartsTable(visibleParts)
     : `<div class="empty-state compact"><div><h3>no matching parts</h3><p>Clear filters or add a component.</p><div class="inline-actions"><button type="button" class="primary-button" data-action="open-add-part">+ add part</button></div></div></div>`;
 
   const categoryKindName = state.categoryFilter !== "all" ? categoryKind(getCategoryName(Number(state.categoryFilter))) : "";
@@ -543,8 +546,10 @@ function renderPartsView() {
         <option value="desc" ${state.sortDir === "desc" ? "selected" : ""}>desc</option>
       </select>
       <button type="button" data-action="set-view" data-target-view="add">bulk add</button>
+      <input type="number" data-render-limit min="50" step="50" value="${escapeAttr(state.renderLimit || PERFORMANCE_DEFAULTS.renderLimit)}" title="render limit" />
       <button type="button" class="primary-button" data-action="open-add-part">+ part</button>
-      <button type="button" data-action="export-db">export</button>
+      <button type="button" data-action="export-csv">CSV</button>
+      <button type="button" data-action="export-db">DB</button>
     </div>
     <details class="column-panel">
       <summary>columns</summary>
@@ -614,6 +619,8 @@ function renderDatabaseView() {
     <div class="database-card">
       <h4>file actions</h4>
       <div class="database-actions">
+        <button type="button" data-action="copy-debug">copy debug snapshot</button>
+        <button type="button" data-action="clear-service-worker">clear SW cache</button>
         <button type="button" data-action="load-bundled-db">reload bundled db</button>
         <button type="button" data-action="save-local-db">save local copy</button>
         <button type="button" class="primary-button" data-action="export-db">download inventory.db</button>
@@ -623,6 +630,8 @@ function renderDatabaseView() {
         <div><dt>source</dt><dd>${escapeHtml(state.dbSource || "local")}</dd></div>
         <div><dt>remote path</dt><dd>${escapeHtml(state.githubConfig.path || BUNDLED_DB_PATH)}</dd></div>
         <div><dt>state</dt><dd>${escapeHtml(databaseStateLabel())}</dd></div>
+        <div><dt>render limit</dt><dd>${escapeHtml(String(state.renderLimit || PERFORMANCE_DEFAULTS.renderLimit))}</dd></div>
+        <div><dt>index cache</dt><dd>${indexCache ? "built" : "cold"}</dd></div>
       </dl>
     </div>
   `;

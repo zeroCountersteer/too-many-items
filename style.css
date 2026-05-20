@@ -2193,3 +2193,36 @@ body::before {
     grid-template-columns: 1fr 1fr;
   }
 }
+
+
+/* v17 performance/reliability */
+.table-more {
+  position: sticky;
+  bottom: 0;
+  background: var(--panel-bg-strong);
+  border: 1px solid var(--panel-border);
+  border-radius: var(--radius-md);
+  padding: 8px;
+  margin-top: 8px;
+  z-index: 4;
+}
+
+.parts-toolbar input[type="number"] {
+  min-width: 90px;
+}
+
+.compact-parts-table {
+  contain: layout paint;
+}
+
+.content-card,
+.table-wrap,
+.scroll-card {
+  scrollbar-width: thin;
+}
+
+@media (max-width: 900px) {
+  .parts-toolbar input[type="number"] {
+    width: 100%;
+  }
+}

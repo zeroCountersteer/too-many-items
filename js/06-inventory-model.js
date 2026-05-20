@@ -1,5 +1,38 @@
 "use strict";
 
+let indexCache = null;
+let indexVersion = 0;
+
+function invalidateIndexes() {
+  indexVersion += 1;
+  indexCache = null;
+}
+
+function rebuildIndexes() {
+  if (indexCache) return indexCache;
+  const stockByPart = new Map();
+  const stockRowsByPart = new Map();
+  for (const row of state.inventory.stock || []) {
+    const partId = Number(row.partId);
+    const existing = stockByPart.get(partId) || { total: 0, min: 0, locations: [], rows: [] };
+    existing.total += numberOrZero(row.quantity);
+    existing.min += numberOrZero(row.minQuantity);
+    existing.rows.push(row);
+    if (row.locationId) existing.locations.push(`${locationPath(row.locationId)}: ${numberOrZero(row.quantity)}`);
+    else existing.locations.push(`no location: ${numberOrZero(row.quantity)}`);
+    stockByPart.set(partId, existing);
+    if (!stockRowsByPart.has(partId)) stockRowsByPart.set(partId, []);
+    stockRowsByPart.get(partId).push(row);
+  }
+
+  const categoriesById = new Map((state.inventory.categories || []).map((category) => [Number(category.id), category]));
+  const partsById = new Map((state.inventory.parts || []).map((part) => [Number(part.id), part]));
+  const locationsById = new Map((state.inventory.locations || []).map((location) => [Number(location.id), location]));
+  indexCache = { stockByPart, stockRowsByPart, categoriesById, partsById, locationsById, version: indexVersion };
+  return indexCache;
+}
+
+
 function filteredParts() {
   const query = String(state.query || "").trim().toLowerCase();
   const packageQuery = String(state.packageFilter || "").trim().toLowerCase();
@@ -74,13 +107,13 @@ function filteredParts() {
 }
 
 function stockSummary(partId) {
-  const rows = state.inventory.stock.filter((row) => row.partId === partId);
-  const total = rows.reduce((sum, row) => sum + numberOrZero(row.quantity), 0);
-  const min = rows.reduce((sum, row) => sum + numberOrZero(row.minQuantity), 0);
-  const locations = rows
-    .map((row) => `${row.locationId ? locationPath(row.locationId) : "no location"}: ${numberOrZero(row.quantity)}`)
-    .join("; ");
-  return { total, min, locations };
+  const cached = rebuildIndexes().stockByPart.get(Number(partId));
+  if (!cached) return { total: 0, min: 0, locations: "" };
+  return {
+    total: cached.total,
+    min: cached.min,
+    locations: cached.locations.join("; ")
+  };
 }
 
 function specSummary(part) {
@@ -370,7 +403,9 @@ function validateInventory(inv) {
 }
 
 function touchInventory() {
-  state.inventory.meta.updatedAt = new Date().toISOString();
+  
+  invalidateIndexes();
+state.inventory.meta.updatedAt = new Date().toISOString();
 }
 
 function inventoryJson() {
@@ -954,3 +989,6 @@ window.reserveProjectParts = reserveProjectParts;
 window.releaseProjectReservations = releaseProjectReservations;
 window.applyProjectConsumption = applyProjectConsumption;
 window.logActivity = logActivity;
+window.invalidateIndexes = invalidateIndexes;
+
+window.rebuildIndexes = rebuildIndexes;

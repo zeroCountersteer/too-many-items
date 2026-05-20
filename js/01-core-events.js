@@ -16,6 +16,7 @@ const state = {
   visibleColumns: loadJsonFromStorage(STORAGE.visibleColumns || "tmi.visibleColumns", DEFAULT_PART_COLUMNS),
   activeProjectId: Number(localStorage.getItem(STORAGE.activeProjectId || "tmi.activeProjectId") || 0),
   projectQuery: "",
+  renderLimit: Number(localStorage.getItem(STORAGE.renderLimit || "tmi.renderLimit") || PERFORMANCE_DEFAULTS.renderLimit),
   sortKey: "category",
   sortDir: "asc",
   githubSha: localStorage.getItem(STORAGE.githubSha) || "",
@@ -59,6 +60,15 @@ async function init() {
   await loadInitialDatabase();
   render();
   document.body.dataset.appReady = "true";
+}
+
+let partsRenderTimer = 0;
+
+function schedulePartsRender() {
+  clearTimeout(partsRenderTimer);
+  partsRenderTimer = setTimeout(() => {
+    renderPartsViewOnly();
+  }, PERFORMANCE_DEFAULTS.debounceMs);
 }
 
 function bindEvents() {
@@ -129,6 +139,25 @@ function handleClick(event) {
       break;
     case "apply-project-consumption":
       applyProjectConsumption(id);
+      break;
+    case "show-more-parts":
+      state.renderLimit = Number(state.renderLimit || PERFORMANCE_DEFAULTS.renderLimit) + PERFORMANCE_DEFAULTS.renderLimit;
+      localStorage.setItem(STORAGE.renderLimit || "tmi.renderLimit", String(state.renderLimit));
+      renderPartsViewOnly();
+      break;
+    case "reset-render-limit":
+      state.renderLimit = PERFORMANCE_DEFAULTS.renderLimit;
+      localStorage.setItem(STORAGE.renderLimit || "tmi.renderLimit", String(state.renderLimit));
+      renderPartsViewOnly();
+      break;
+    case "export-csv":
+      exportPartsCsv();
+      break;
+    case "copy-debug":
+      copyDebugSnapshot();
+      break;
+    case "clear-service-worker":
+      clearServiceWorkerCaches();
       break;
     case "match-bom-row":
       matchBomRow(id);
@@ -245,31 +274,31 @@ function handleInput(event) {
   const target = event.target;
   if (target.matches("[data-search]")) {
     state.query = target.value;
-    renderPartsViewOnly();
+    schedulePartsRender();
     return;
   }
 
   if (target.matches("[data-package-filter]")) {
     state.packageFilter = target.value;
-    renderPartsViewOnly();
+    schedulePartsRender();
     return;
   }
 
   if (target.matches("[data-spec-min]")) {
     state.specFilterMin = target.value;
-    renderPartsViewOnly();
+    schedulePartsRender();
     return;
   }
 
   if (target.matches("[data-spec-max]")) {
     state.specFilterMax = target.value;
-    renderPartsViewOnly();
+    schedulePartsRender();
     return;
   }
 
   if (target.matches("[data-spec-extra]")) {
     state.specFilterExtra = target.value;
-    renderPartsViewOnly();
+    schedulePartsRender();
     return;
   }
 
@@ -284,6 +313,14 @@ function handleInput(event) {
     return;
   }
 
+  if (target.matches("[data-render-limit]")) {
+    const value = Math.max(50, Number(target.value) || PERFORMANCE_DEFAULTS.renderLimit);
+    state.renderLimit = value;
+    localStorage.setItem(STORAGE.renderLimit || "tmi.renderLimit", String(value));
+    schedulePartsRender();
+    return;
+  }
+
   if (target.matches("[data-theme-var]")) {
     updateCustomThemeFromInputs();
   }
@@ -294,25 +331,25 @@ function handleChange(event) {
 
   if (target.matches("[data-category-filter]")) {
     state.categoryFilter = target.value;
-    renderPartsViewOnly();
+    schedulePartsRender();
     return;
   }
 
   if (target.matches("[data-stock-filter]")) {
     state.stockFilter = target.value;
-    renderPartsViewOnly();
+    schedulePartsRender();
     return;
   }
 
   if (target.matches("[data-sort-key]")) {
     state.sortKey = target.value;
-    renderPartsViewOnly();
+    schedulePartsRender();
     return;
   }
 
   if (target.matches("[data-sort-dir]")) {
     state.sortDir = target.value;
-    renderPartsViewOnly();
+    schedulePartsRender();
     return;
   }
 
@@ -323,7 +360,7 @@ function handleChange(event) {
     else if (column !== "actions") active.delete(column);
     state.visibleColumns = [...active];
     saveVisibleColumns();
-    renderPartsViewOnly();
+    schedulePartsRender();
     return;
   }
 
@@ -388,3 +425,60 @@ function setView(view) {
   render();
 }
 
+
+
+function exportPartsCsv() {
+  const rows = filteredParts();
+  const header = ["id", "name", "category", "value", "package", "footprint", "quantity", "location", "manufacturer", "mpn", "notes"];
+  const csv = [header.join(",")].concat(rows.map((part) => {
+    const stock = stockSummary(part.id);
+    const cells = [
+      part.id,
+      part.name,
+      getCategoryName(part.categoryId),
+      specSummary(part),
+      part.package,
+      part.footprint,
+      stock.total,
+      stock.locations,
+      part.manufacturer,
+      part.mpn,
+      part.notes
+    ];
+    return cells.map(csvCell).join(",");
+  })).join("\n") + "\n";
+  downloadBytes("inventory-parts.csv", new TextEncoder().encode(csv), "text/csv");
+}
+
+function csvCell(value) {
+  const text = String(value ?? "");
+  return /[",\n]/.test(text) ? `"${text.replaceAll('"', '""')}"` : text;
+}
+
+async function copyDebugSnapshot() {
+  const metrics = getMetrics();
+  const snapshot = {
+    version: "v17",
+    dbSource: state.dbSource,
+    dbDirty: state.dbDirty,
+    activeView: state.activeView,
+    metrics,
+    projects: projectStats(),
+    serviceWorker: !!navigator.serviceWorker,
+    userAgent: navigator.userAgent
+  };
+  await navigator.clipboard?.writeText(JSON.stringify(snapshot, null, 2));
+  toast("debug snapshot copied");
+}
+
+async function clearServiceWorkerCaches() {
+  if ("serviceWorker" in navigator) {
+    const regs = await navigator.serviceWorker.getRegistrations();
+    await Promise.all(regs.map((reg) => reg.unregister()));
+  }
+  if ("caches" in window) {
+    const keys = await caches.keys();
+    await Promise.all(keys.map((key) => caches.delete(key)));
+  }
+  toast("service worker/cache cleared");
+}

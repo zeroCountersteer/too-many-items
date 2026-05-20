@@ -64,6 +64,7 @@ function loadDatabaseBytes(bytes, options = {}) {
     db.close();
   }
   state.inventory = normalizeInventory(inventory);
+  invalidateIndexes();
   state.dbBytes = new Uint8Array(bytes);
   state.dbFileName = options.fileName || "inventory.db";
   state.dbSource = options.source || "SQLite file";
@@ -93,6 +94,7 @@ function persistDatabase(message = "database saved", options = {}) {
     toast(`database not saved: ${error.message}`, "error");
     return null;
   }
+  invalidateIndexes();
   state.dbBytes = bytes;
   state.dbFileName = "inventory.db";
   state.dbSource = state.dbSource || "browser local copy";

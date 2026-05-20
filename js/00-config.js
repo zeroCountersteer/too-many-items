@@ -1931,3 +1931,9 @@ const PROJECT_COLUMN_DEFS = {
   fitted: "Fitted",
   actions: ""
 };
+
+
+const PERFORMANCE_DEFAULTS = {
+  renderLimit: 250,
+  debounceMs: 120
+};
