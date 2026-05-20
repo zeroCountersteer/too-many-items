@@ -385,19 +385,26 @@ async function commitToGitHub() {
     const cfg = requireGitHubConfig();
     const validation = validateInventory(state.inventory);
     if (!validation.ok) throw new Error(`inventory is invalid: ${validation.errors[0]}`);
+
     setStatus("committing database to github...");
     touchInventory();
     const bytes = persistDatabase("database prepared", { dirty: true });
     if (!bytes) return;
-    let sha = state.githubSha;
-    if (!sha) sha = await githubTryGetSha(cfg);
-    const result = await githubSaveBytes({
-      ...cfg,
-      sha,
-      bytes,
-      message: `inventory: update database ${new Date().toISOString().slice(0, 19).replace("T", " ")}`
-    });
-    state.githubSha = result.content?.sha || state.githubSha;
+
+    const message = `inventory: update database ${new Date().toISOString().slice(0, 19).replace("T", " ")}`;
+    let sha = await githubTryGetSha(cfg);
+    let result;
+
+    try {
+      result = await githubSaveBytes({ ...cfg, sha, bytes, message });
+    } catch (error) {
+      if (!isGithubConflict(error)) throw error;
+      setStatus("github conflict; refreshing remote version...");
+      sha = await githubTryGetSha(cfg);
+      result = await githubSaveBytes({ ...cfg, sha, bytes, message });
+    }
+
+    state.githubSha = result.content?.sha || sha || state.githubSha;
     state.dbDirty = false;
     localStorage.setItem(STORAGE.githubSha, state.githubSha);
     cacheDatabaseBytes(bytes, state.dbSource, false);
@@ -438,6 +445,10 @@ async function githubSaveBytes({ owner, repo, branch, path, token, bytes, sha, m
   return githubRequest(url, token, { method: "PUT", body: JSON.stringify(body) });
 }
 
+function isGithubConflict(error) {
+  return /(^|\D)409(\D|$)/.test(String(error && error.message ? error.message : error));
+}
+
 async function githubRequest(url, token, options = {}) {
   const response = await fetch(url, {
     ...options,
@@ -460,3 +471,38 @@ function encodePath(path) {
   return String(path).split("/").map(encodeURIComponent).join("/");
 }
 
+
+
+Object.assign(window, {
+  filteredParts,
+  stockSummary,
+  specSummary,
+  getSpec,
+  categoryKind,
+  getCategoryName,
+  locationPath,
+  getMetrics,
+  createEmptyInventory,
+  normalizeInventory,
+  ensureInventoryShape,
+  normalizeReferences,
+  normalizeCategories,
+  normalizeLocations,
+  normalizeParts,
+  normalizeStock,
+  normalizeSpecs,
+  normalizeAttributes,
+  validateInventory,
+  touchInventory,
+  addOrUpdatePart,
+  deletePart,
+  saveSettingsFromForm,
+  saveExternalApiSettings,
+  loadFromGitHub,
+  commitToGitHub,
+  githubLoadBytes,
+  githubTryGetSha,
+  githubSaveBytes,
+  githubRequest,
+  encodePath
+});

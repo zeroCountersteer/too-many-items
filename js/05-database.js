@@ -365,10 +365,7 @@ function insertSpecRows(db, inv, kind) {
 }
 
 function runSqlScript(db, script) {
-  script.split(/;\s*(?:\n|$)/).forEach((statement) => {
-    const sql = statement.trim();
-    if (sql) db.run(sql);
-  });
+  db.exec(script);
 }
 
 function requireSql() {
