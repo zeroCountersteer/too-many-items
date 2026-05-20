@@ -2,7 +2,7 @@
 
 const SQLJS_CDN = "https://cdn.jsdelivr.net/npm/sql.js@1.10.3/dist/";
 const BUNDLED_DB_PATH = "data/inventory.db";
-const VALID_VIEWS = new Set(["parts", "locations", "database", "settings"]);
+const VALID_VIEWS = new Set(["parts", "add", "locations", "database", "settings"]);
 
 const STORAGE = {
   dbBase64: "tmi.v3.database.base64",
@@ -15,7 +15,9 @@ const STORAGE = {
   activeTheme: "tmi.v3.activeTheme",
   customThemes: "tmi.v3.customThemes",
   movingBackground: "tmi.v3.movingBackground",
-  token: "tmi.v3.github.token"
+  token: "tmi.v3.github.token",
+  externalApiConfig: "tmi.v5.external.api.config",
+  externalApiToken: "tmi.v5.external.api.token"
 };
 
 const DEFAULT_CATEGORIES = [
@@ -1884,6 +1886,14 @@ const state = {
   customThemes: loadJsonFromStorage(STORAGE.customThemes, {}),
   activeTheme: localStorage.getItem(STORAGE.activeTheme) || "angelCloud",
   movingBackground: localStorage.getItem(STORAGE.movingBackground) !== "off",
+  externalApiConfig: loadJsonFromStorage(STORAGE.externalApiConfig, {
+    provider: "nexar",
+    genericUrlTemplate: "",
+    ultraUrlTemplate: "",
+    bearerPrefix: "Bearer"
+  }),
+  externalResults: [],
+  externalLastQuery: "",
   dbSource: localStorage.getItem(STORAGE.dbSource) || "not loaded",
   dbFileName: "inventory.db",
   dbDirty: localStorage.getItem(STORAGE.dbDirty) === "1",
@@ -1938,6 +1948,24 @@ function handleClick(event) {
   const id = actionTarget.dataset.id ? Number(actionTarget.dataset.id) : null;
 
   switch (action) {
+    case "set-view":
+      setView(actionTarget.dataset.targetView || "parts");
+      break;
+    case "preview-bulk":
+      previewBulkImport();
+      break;
+    case "import-bulk":
+      importBulkParts();
+      break;
+    case "lookup-external-part":
+      lookupExternalPart();
+      break;
+    case "add-api-result":
+      openPartModal(null, state.externalResults[Number(actionTarget.dataset.index)] || null);
+      break;
+    case "open-api-settings":
+      setView("settings");
+      break;
     case "open-add-part":
       openPartModal();
       break;
@@ -2063,6 +2091,16 @@ function handleChange(event) {
 }
 
 function handleSubmit(event) {
+  if (event.target.id === "bulkImportForm") {
+    event.preventDefault();
+    importBulkParts();
+  }
+
+  if (event.target.id === "externalLookupForm") {
+    event.preventDefault();
+    lookupExternalPart();
+  }
+
   if (event.target.id === "partForm") {
     event.preventDefault();
     savePartFromForm(event.target);
@@ -2099,6 +2137,7 @@ function render() {
 
   const panel = $("#viewPanel");
   if (state.activeView === "parts") panel.innerHTML = renderPartsView();
+  if (state.activeView === "add") panel.innerHTML = renderAddImportView();
   if (state.activeView === "locations") panel.innerHTML = renderLocationsView();
   if (state.activeView === "database") panel.innerHTML = renderDatabaseView();
   if (state.activeView === "settings") panel.innerHTML = renderSettingsView();
@@ -2121,6 +2160,7 @@ function renderNavigation() {
 function renderHeader() {
   const titles = {
     parts: ["INVENTORY / PARTS", "electronic components"],
+    add: ["INVENTORY / ADD", "batch import and api lookup"],
     locations: ["INVENTORY / LOCATIONS", "storage map"],
     database: ["INVENTORY / DATABASE", "sqlite storage"],
     settings: ["INVENTORY / SETTINGS", "configuration"]
@@ -2132,7 +2172,11 @@ function renderHeader() {
   const actions = [];
   if (state.activeView === "parts") {
     actions.push(`<button type="button" data-action="export-db">export .db</button>`);
+    actions.push(`<button type="button" data-action="set-view" data-target-view="add">batch / api</button>`);
     actions.push(`<button type="button" class="primary-button" data-action="open-add-part">+ add part</button>`);
+  } else if (state.activeView === "add") {
+    actions.push(`<button type="button" data-action="set-view" data-target-view="parts">parts list</button>`);
+    actions.push(`<button type="button" class="primary-button" data-action="open-add-part">+ manual part</button>`);
   } else if (state.activeView === "locations") {
     actions.push(`<button type="button" data-action="export-db">export .db</button>`);
     actions.push(`<button type="button" class="primary-button" data-action="open-add-location">+ add location</button>`);
@@ -2220,6 +2264,7 @@ function renderPartsView() {
       <h3 class="view-title"><span>information</span> / parts overview</h3>
       <div class="tool-row">
         <button type="button" data-action="add-category">+ category</button>
+        <button type="button" data-action="set-view" data-target-view="add">batch / api</button>
         <button type="button" class="primary-button" data-action="open-add-part">+ add part</button>
       </div>
     </div>
@@ -2273,6 +2318,101 @@ function renderPartsTable(parts) {
       <tbody>${rows}</tbody>
     </table>
   </div>`;
+}
+
+
+function renderAddImportView() {
+  const locations = [`<option value="">no default location</option>`].concat(
+    state.inventory.locations.map((location) => `<option value="${location.id}">${escapeHtml(locationPath(location.id))}</option>`)
+  ).join("");
+  const provider = state.externalApiConfig.provider || "nexar";
+  const apiConfigured = externalApiConfigured(provider);
+  const apiResults = state.externalResults.length
+    ? `<div class="api-result-list">${state.externalResults.map((item, index) => renderExternalResult(item, index)).join("")}</div>`
+    : `<div class="empty-state compact"><div><h3>no api results</h3><p>Search by manufacturer part number, then review a result before adding it to the database.</p></div></div>`;
+
+  return `
+    <div class="view-head">
+      <h3 class="view-title"><span>add</span> / batch and api</h3>
+      <div class="tool-row">
+        <button type="button" data-action="set-view" data-target-view="parts">parts list</button>
+        <button type="button" class="primary-button" data-action="open-add-part">+ manual part</button>
+      </div>
+    </div>
+
+    <div class="add-import-grid">
+      <section class="database-card add-card">
+        <h4>bulk add passive parts</h4>
+        <p class="small-note">Paste many values at once. Header rows are supported. Without headers the default resistor order is: value, quantity, package, tolerance, power, voltage, location, min, source.</p>
+        <form id="bulkImportForm">
+          <div class="form-grid">
+            <div class="field"><label>kind</label><select name="kind">
+              <option value="resistor">resistors</option>
+              <option value="capacitor">capacitors</option>
+              <option value="inductor">inductors</option>
+              <option value="generic">generic parts</option>
+            </select></div>
+            <div class="field"><label>default package</label><input name="defaultPackage" placeholder="0603" /></div>
+            <div class="field"><label>default footprint</label><input name="defaultFootprint" placeholder="R_0603_1608Metric" /></div>
+            <div class="field"><label>default qty</label><input name="defaultQuantity" type="number" min="0" step="1" value="0" /></div>
+            <div class="field"><label>default min</label><input name="defaultMin" type="number" min="0" step="1" value="0" /></div>
+            <div class="field"><label>default location</label><select name="defaultLocationId">${locations}</select></div>
+            <div class="field"><label>new location by name</label><input name="defaultLocationName" placeholder="A01 resistors" /></div>
+            <div class="field"><label>source</label><input name="defaultSource" placeholder="LCSC, AliExpress, Mouser" /></div>
+            <div class="field"><label>tolerance %</label><input name="defaultTolerance" placeholder="1" /></div>
+            <div class="field"><label>power W</label><input name="defaultPower" placeholder="0.1 or 1/10W" /></div>
+            <div class="field"><label>voltage V</label><input name="defaultVoltage" placeholder="50" /></div>
+            <label class="switch-row inline-switch"><span>merge matching existing parts</span><input name="mergeExisting" type="checkbox" checked /></label>
+          </div>
+          <div class="field"><label>rows</label><textarea name="bulkText" class="bulk-textarea" spellcheck="false" placeholder="10R,100,0603,1%,0.1W\n22R,100,0603,1%,0.1W\n4.7k,200,0603,1%,0.1W\n100k,100,0603,1%,0.1W"></textarea></div>
+          <div class="database-actions">
+            <button type="button" data-action="preview-bulk">preview</button>
+            <button type="button" class="primary-button" data-action="import-bulk">import rows</button>
+          </div>
+        </form>
+        <div id="bulkPreview" class="bulk-preview"></div>
+      </section>
+
+      <section class="database-card add-card">
+        <h4>external part lookup</h4>
+        <p class="small-note">Uses the connector selected in Settings. Nexar works with an application access token; Ultra Librarian and generic REST use a URL template that must return JSON and allow browser CORS.</p>
+        <form id="externalLookupForm">
+          <div class="form-grid">
+            <div class="field"><label>provider</label><select name="provider">
+              <option value="nexar" ${provider === "nexar" ? "selected" : ""}>Nexar / Octopart</option>
+              <option value="ultralibrarian" ${provider === "ultralibrarian" ? "selected" : ""}>Ultra Librarian template</option>
+              <option value="generic" ${provider === "generic" ? "selected" : ""}>Generic REST JSON</option>
+            </select></div>
+            <div class="field span-2"><label>mpn or search text</label><input name="query" value="${escapeAttr(state.externalLastQuery)}" placeholder="TPS25751D, STM32F103C8T6, RC0603FR-0710KL" /></div>
+            <div class="field"><label>manufacturer hint</label><input name="manufacturer" placeholder="Texas Instruments" /></div>
+          </div>
+          <p class="small-note">provider status: ${apiConfigured ? "configured" : "needs settings"}</p>
+          <div class="database-actions">
+            <button type="button" data-action="open-api-settings">api settings</button>
+            <button type="button" class="primary-button" data-action="lookup-external-part">search</button>
+          </div>
+        </form>
+        ${apiResults}
+      </section>
+    </div>
+  `;
+}
+
+function renderExternalResult(item, index) {
+  const sub = [item.manufacturer, item.mpn].filter(Boolean).join(" / ") || "unknown manufacturer/mpn";
+  const chips = [item.categoryName, item.package, item.footprint].filter(Boolean).map((value) => `<span class="tag-pill">${escapeHtml(value)}</span>`).join("");
+  return `<article class="api-result">
+    <div>
+      <h4>${escapeHtml(item.name || item.mpn || "external part")}</h4>
+      <p class="small-note">${escapeHtml(sub)}</p>
+      ${item.description ? `<p>${escapeHtml(item.description)}</p>` : ""}
+      <div class="tag-row">${chips}</div>
+    </div>
+    <div class="api-result-actions">
+      ${item.datasheetUrl ? `<a class="ghost-link" href="${escapeAttr(item.datasheetUrl)}" target="_blank" rel="noreferrer">datasheet</a>` : ""}
+      <button type="button" class="primary-button" data-action="add-api-result" data-index="${index}">review + add</button>
+    </div>
+  </article>`;
 }
 
 function renderLocationsView() {
@@ -2369,6 +2509,8 @@ function renderDatabaseView() {
 function renderSettingsView() {
   const cfg = state.githubConfig;
   const tokenPresent = sessionStorage.getItem(STORAGE.token) ? "token active for this tab" : "token not set";
+  const apiCfg = state.externalApiConfig || {};
+  const apiTokenPresent = sessionStorage.getItem(STORAGE.externalApiToken) ? "api token active for this tab" : "api token not set";
   const themeOptions = allThemes().map((theme) => `<option value="${escapeAttr(theme.id)}" ${theme.id === state.activeTheme ? "selected" : ""}>${escapeHtml(theme.name)}</option>`).join("");
   const current = getTheme(state.activeTheme) || BUILTIN_THEMES.angelCloud;
   const editor = THEME_FIELDS.map((key) => {
@@ -2402,6 +2544,23 @@ function renderSettingsView() {
           </div>
         </section>
 
+
+        <section class="settings-card">
+          <h4>external APIs</h4>
+          <div class="form-grid">
+            <div class="field"><label>default provider</label><select name="apiProvider">
+              <option value="nexar" ${apiCfg.provider === "nexar" ? "selected" : ""}>Nexar / Octopart</option>
+              <option value="ultralibrarian" ${apiCfg.provider === "ultralibrarian" ? "selected" : ""}>Ultra Librarian template</option>
+              <option value="generic" ${apiCfg.provider === "generic" ? "selected" : ""}>Generic REST JSON</option>
+            </select></div>
+            <div class="field"><label>auth prefix</label><input name="apiBearerPrefix" value="${escapeAttr(apiCfg.bearerPrefix || "Bearer")}" placeholder="Bearer" /></div>
+            <div class="field span-2"><label>api token</label><input type="password" name="externalApiToken" placeholder="session only" autocomplete="off" /></div>
+            <div class="field span-2"><label>Ultra Librarian URL template</label><input name="ultraUrlTemplate" value="${escapeAttr(apiCfg.ultraUrlTemplate || "")}" placeholder="https://api.example.com/search?q={q}" /></div>
+            <div class="field span-2"><label>generic REST URL template</label><input name="genericUrlTemplate" value="${escapeAttr(apiCfg.genericUrlTemplate || "")}" placeholder="https://api.example.com/parts?mpn={q}&mfr={manufacturer}" /></div>
+          </div>
+          <p class="small-note">${escapeHtml(apiTokenPresent)}. Tokens are kept in sessionStorage only. Do not put client secrets in a public GitHub Pages site.</p>
+        </section>
+
         <section class="settings-card">
           <h4>appearance</h4>
           <label class="switch-row">
@@ -2431,10 +2590,527 @@ function renderSettingsView() {
   `;
 }
 
-function openPartModal(partId = null) {
+
+function previewBulkImport() {
+  const form = $("#bulkImportForm");
+  if (!form) return;
+  const parsed = parseBulkImportForm(form);
+  const target = $("#bulkPreview");
+  if (!target) return;
+  if (!parsed.rows.length) {
+    target.innerHTML = `<div class="empty-state compact"><div><h3>nothing parsed</h3><p>${escapeHtml(parsed.errors[0] || "Paste at least one row.")}</p></div></div>`;
+    return;
+  }
+  const rows = parsed.rows.slice(0, 80).map((row, index) => `<tr><td>${index + 1}</td><td>${escapeHtml(row.part.name)}</td><td>${escapeHtml(getCategoryName(row.part.categoryId))}</td><td>${escapeHtml(row.part.package || "")}</td><td>${escapeHtml(row.specText || "")}</td><td>${row.stock.quantity}</td><td>${escapeHtml(row.locationLabel || "")}</td></tr>`).join("");
+  const more = parsed.rows.length > 80 ? `<p class="small-note">showing first 80 of ${parsed.rows.length} rows</p>` : "";
+  target.innerHTML = `
+    <p class="section-title">preview / ${parsed.rows.length} row${parsed.rows.length === 1 ? "" : "s"}</p>
+    ${parsed.errors.length ? `<p class="small-note danger-text">${escapeHtml(parsed.errors.slice(0, 3).join(" / "))}</p>` : ""}
+    <div class="table-shell compact-table"><table><thead><tr><th>#</th><th>part</th><th>cat</th><th>pkg</th><th>spec</th><th>qty</th><th>location</th></tr></thead><tbody>${rows}</tbody></table></div>${more}`;
+}
+
+function importBulkParts() {
+  const form = $("#bulkImportForm");
+  if (!form) return;
+  const parsed = parseBulkImportForm(form);
+  if (!parsed.rows.length) {
+    toast(parsed.errors[0] || "nothing to import", "error");
+    previewBulkImport();
+    return;
+  }
+  const mergeExisting = new FormData(form).get("mergeExisting") === "on";
+  let added = 0;
+  let merged = 0;
+  parsed.rows.forEach((row) => {
+    const existing = mergeExisting ? findMatchingPart(row.part, row.kind, row.spec) : null;
+    const partId = existing ? existing.id : nextId(state.inventory.parts);
+    if (existing) {
+      merged += 1;
+    } else {
+      state.inventory.parts.push({ ...row.part, id: partId });
+      if (row.spec) state.inventory[SPEC_CONFIGS[row.kind]?.table]?.push({ ...row.spec, partId });
+      added += 1;
+    }
+    if (row.stock.quantity > 0 || row.stock.minQuantity > 0 || row.stock.locationId || row.stock.source) {
+      state.inventory.stock.push({ ...row.stock, id: nextId(state.inventory.stock), partId });
+    }
+  });
+  touchInventory();
+  if (!persistDatabase(`bulk import: ${added} added, ${merged} merged`, { dirty: true })) return;
+  toast(`bulk import complete: ${added} added, ${merged} merged`);
+  render();
+}
+
+function parseBulkImportForm(form) {
+  const fd = new FormData(form);
+  const kind = textValue(fd.get("kind")) || "resistor";
+  const defaultPackage = nullableText(fd.get("defaultPackage"));
+  const defaultFootprint = nullableText(fd.get("defaultFootprint"));
+  const defaultQuantity = integerOrZero(fd.get("defaultQuantity"));
+  const defaultMin = integerOrZero(fd.get("defaultMin"));
+  const defaultSource = nullableText(fd.get("defaultSource"));
+  const defaultTolerance = nullableNumber(cleanPercent(fd.get("defaultTolerance")));
+  const defaultPower = parsePower(fd.get("defaultPower"));
+  const defaultVoltage = nullableNumber(cleanVoltage(fd.get("defaultVoltage")));
+  const defaultLocationName = nullableText(fd.get("defaultLocationName"));
+  const defaultLocationId = defaultLocationName ? ensureLocationByPath(defaultLocationName) : nullableNumber(fd.get("defaultLocationId"));
+  const text = textValue(fd.get("bulkText"));
+  const errors = [];
+  const rows = [];
+  if (!text) return { rows, errors: ["bulk text is empty"] };
+  const lines = text.split(/\r?\n/).map((line) => line.trim()).filter((line) => line && !line.startsWith("#") && !line.startsWith("//"));
+  let header = null;
+  const now = new Date().toISOString();
+  for (const line of lines) {
+    const cells = splitBulkLine(line);
+    if (!cells.length) continue;
+    if (!header && looksLikeHeader(cells)) {
+      header = cells.map(normalizeHeaderName);
+      continue;
+    }
+    const data = header ? rowFromHeader(cells, header) : rowFromPositional(cells, kind);
+    try {
+      const built = buildBulkRow({ data, kind, defaultPackage, defaultFootprint, defaultQuantity, defaultMin, defaultSource, defaultTolerance, defaultPower, defaultVoltage, defaultLocationId, now });
+      rows.push(built);
+    } catch (error) {
+      errors.push(`${line}: ${error.message}`);
+    }
+  }
+  return { rows, errors };
+}
+
+function buildBulkRow(ctx) {
+  const data = ctx.data;
+  const kind = ctx.kind;
+  const packageName = nullableText(data.package) || ctx.defaultPackage;
+  const footprint = nullableText(data.footprint) || ctx.defaultFootprint;
+  const quantity = integerOrZero(firstFilled(data.quantity, data.qty, ctx.defaultQuantity));
+  const minQuantity = integerOrZero(firstFilled(data.minQuantity, data.min, ctx.defaultMin));
+  const source = nullableText(data.source) || ctx.defaultSource;
+  const locationId = nullableText(data.location) ? ensureLocationByPath(data.location) : ctx.defaultLocationId;
+  const categoryId = kind === "generic" ? ensureCategoryByName(data.category || "other") : ensureCategoryByName(kind);
+  const createdAt = ctx.now;
+  const basePart = {
+    id: 0,
+    categoryId,
+    name: "",
+    manufacturer: nullableText(data.manufacturer),
+    mpn: nullableText(data.mpn),
+    footprint,
+    package: packageName,
+    description: nullableText(data.description),
+    datasheetUrl: nullableText(data.datasheetUrl ?? data.datasheet),
+    notes: nullableText(data.notes),
+    createdAt,
+    updatedAt: createdAt
+  };
+  let spec = null;
+  let specText = "";
+  if (kind === "resistor") {
+    const ohm = parseResistance(data.value ?? data.resistance ?? data.resistanceOhm);
+    if (ohm === null) throw new Error("resistance value is missing or invalid");
+    const tolerance = nullableNumber(cleanPercent(data.tolerance)) ?? ctx.defaultTolerance;
+    const power = parsePower(data.power) ?? ctx.defaultPower;
+    const voltage = nullableNumber(cleanVoltage(data.voltage)) ?? ctx.defaultVoltage;
+    spec = { partId: 0, resistanceOhm: ohm, tolerancePercent: tolerance ?? undefined, powerW: power ?? undefined, voltageV: voltage ?? undefined };
+    specText = [formatResistance(ohm), tolerance != null ? `${tolerance}%` : "", power != null ? `${power}W` : ""].filter(Boolean).join(" ");
+    basePart.name = nullableText(data.name) || [formatResistance(ohm), tolerance != null ? `${tolerance}%` : null, power != null ? `${formatPower(power)}` : null, packageName].filter(Boolean).join(" ");
+  } else if (kind === "capacitor") {
+    const farad = parseCapacitance(data.value ?? data.capacitance ?? data.capacitanceF);
+    if (farad === null) throw new Error("capacitance value is missing or invalid");
+    const voltage = nullableNumber(cleanVoltage(data.voltage)) ?? ctx.defaultVoltage;
+    const tolerance = nullableNumber(cleanPercent(data.tolerance)) ?? ctx.defaultTolerance;
+    const dielectric = nullableText(data.dielectric);
+    spec = { partId: 0, capacitanceF: farad, voltageV: voltage ?? undefined, tolerancePercent: tolerance ?? undefined, dielectric: dielectric ?? undefined };
+    specText = [formatCapacitance(farad), voltage != null ? `${voltage}V` : "", dielectric || ""].filter(Boolean).join(" ");
+    basePart.name = nullableText(data.name) || [formatCapacitance(farad), voltage != null ? `${voltage}V` : null, dielectric, packageName].filter(Boolean).join(" ");
+  } else if (kind === "inductor") {
+    const henry = parseInductance(data.value ?? data.inductance ?? data.inductanceH);
+    if (henry === null) throw new Error("inductance value is missing or invalid");
+    const current = nullableNumber(cleanCurrent(data.current));
+    const dcr = parseResistance(data.dcr ?? data.resistance ?? data.resistanceOhm);
+    spec = { partId: 0, inductanceH: henry, currentA: current ?? undefined, resistanceOhm: dcr ?? undefined };
+    specText = [formatInductance(henry), current != null ? `${current}A` : ""].filter(Boolean).join(" ");
+    basePart.name = nullableText(data.name) || [formatInductance(henry), current != null ? `${current}A` : null, packageName].filter(Boolean).join(" ");
+  } else {
+    basePart.name = nullableText(data.name || data.value || data.mpn) || "generic part";
+  }
+  return {
+    kind,
+    part: basePart,
+    spec,
+    specText,
+    locationLabel: locationId ? locationPath(locationId) : "",
+    stock: {
+      id: 0,
+      partId: 0,
+      locationId: locationId || null,
+      quantity,
+      minQuantity,
+      source,
+      orderNumber: nullableText(data.orderNumber),
+      unitPrice: nullableNumber(data.unitPrice),
+      currency: nullableText(data.currency),
+      dateAdded: new Date().toISOString().slice(0, 10),
+      notes: nullableText(data.stockNotes)
+    }
+  };
+}
+
+function splitBulkLine(line) {
+  const trimmed = line.trim();
+  const delimiter = trimmed.includes("\t") ? "\t" : trimmed.includes(";") ? ";" : trimmed.includes(",") ? "," : null;
+  return delimiter ? parseSimpleCsvLine(trimmed, delimiter) : trimmed.split(/\s+/).map((cell) => cell.trim()).filter(Boolean);
+}
+
+function parseSimpleCsvLine(line, delimiter) {
+  const out = [];
+  let current = "";
+  let quoted = false;
+  for (let i = 0; i < line.length; i += 1) {
+    const ch = line[i];
+    if (ch === '"') {
+      if (quoted && line[i + 1] === '"') { current += '"'; i += 1; }
+      else quoted = !quoted;
+    } else if (ch === delimiter && !quoted) {
+      out.push(current.trim());
+      current = "";
+    } else {
+      current += ch;
+    }
+  }
+  out.push(current.trim());
+  return out;
+}
+
+function looksLikeHeader(cells) {
+  const names = cells.map(normalizeHeaderName);
+  return names.some((name) => ["value", "resistance", "capacitance", "inductance", "quantity", "qty", "package", "footprint", "mpn", "manufacturer", "location"].includes(name));
+}
+
+function normalizeHeaderName(value) {
+  return String(value || "").trim().toLowerCase().replace(/[^a-z0-9]+/g, "_").replace(/^_+|_+$/g, "").replace(/^manf_?num$/, "mpn").replace(/^mfr$/, "manufacturer").replace(/^qty$/, "quantity");
+}
+
+function rowFromHeader(cells, header) {
+  const row = {};
+  header.forEach((name, index) => { row[headerAlias(name)] = cells[index] ?? ""; });
+  return row;
+}
+
+function headerAlias(name) {
+  const aliases = {
+    resistance_ohm: "resistanceOhm",
+    capacitance_f: "capacitanceF",
+    inductance_h: "inductanceH",
+    min_quantity: "minQuantity",
+    datasheet_url: "datasheetUrl",
+    part_number: "mpn",
+    manufacturer_part_number: "mpn",
+    mfg_part_number: "mpn",
+    source_supplier: "source"
+  };
+  return aliases[name] || name;
+}
+
+function rowFromPositional(cells, kind) {
+  const row = {};
+  const maps = {
+    resistor: ["value", "quantity", "package", "tolerance", "power", "voltage", "location", "minQuantity", "source"],
+    capacitor: ["value", "voltage", "quantity", "package", "dielectric", "tolerance", "location", "minQuantity", "source"],
+    inductor: ["value", "current", "quantity", "package", "dcr", "location", "minQuantity", "source"],
+    generic: ["name", "quantity", "category", "package", "footprint", "location", "mpn", "manufacturer"]
+  };
+  (maps[kind] || maps.generic).forEach((key, index) => { row[key] = cells[index] ?? ""; });
+  return row;
+}
+
+function findMatchingPart(part, kind, spec) {
+  return state.inventory.parts.find((item) => {
+    if (item.categoryId !== part.categoryId) return false;
+    if (String(item.name).toLowerCase() !== String(part.name).toLowerCase()) return false;
+    if (String(item.package || "").toLowerCase() !== String(part.package || "").toLowerCase()) return false;
+    if (String(item.footprint || "").toLowerCase() !== String(part.footprint || "").toLowerCase()) return false;
+    if (part.mpn && item.mpn && String(item.mpn).toLowerCase() !== String(part.mpn).toLowerCase()) return false;
+    if (!spec || !SPEC_CONFIGS[kind]) return true;
+    const existingSpec = getSpec(item.id, kind);
+    if (!existingSpec) return false;
+    const firstField = SPEC_CONFIGS[kind].fields[0][0];
+    return Math.abs(Number(existingSpec[firstField]) - Number(spec[firstField])) < 1e-18;
+  });
+}
+
+async function lookupExternalPart() {
+  const form = $("#externalLookupForm");
+  if (!form) return;
+  const fd = new FormData(form);
+  const provider = textValue(fd.get("provider")) || state.externalApiConfig.provider || "nexar";
+  const query = textValue(fd.get("query"));
+  const manufacturer = textValue(fd.get("manufacturer"));
+  if (!query) { toast("enter MPN or search text", "error"); return; }
+  state.externalLastQuery = query;
+  state.externalApiConfig.provider = provider;
+  localStorage.setItem(STORAGE.externalApiConfig, JSON.stringify(state.externalApiConfig));
+  setStatus(`searching ${provider}...`);
+  try {
+    let results;
+    if (provider === "nexar") results = await lookupNexar(query);
+    else results = await lookupGenericProvider(provider, query, manufacturer);
+    state.externalResults = results;
+    setStatus(`${results.length} external result${results.length === 1 ? "" : "s"}`);
+    render();
+  } catch (error) {
+    setStatus("external lookup failed");
+    toast(error.message, "error");
+  }
+}
+
+async function lookupNexar(mpn) {
+  const token = sessionStorage.getItem(STORAGE.externalApiToken);
+  if (!token) throw new Error("paste Nexar application access token in Settings first");
+  const query = `query ($mpn: String!) { supSearchMpn(q: $mpn) { hits results { part { id name mpn manufacturer { name } shortDescription descriptions { text } category { id name path } specs { attribute { name shortname } displayValue value unitsName unitsSymbol } } } } }`;
+  const response = await fetch("https://api.nexar.com/graphql", {
+    method: "POST",
+    headers: { "Content-Type": "application/json", token },
+    body: JSON.stringify({ query, variables: { mpn } })
+  });
+  const data = await response.json();
+  if (!response.ok || data.errors) throw new Error((data.errors || []).map((err) => err.message).join("; ") || `${response.status} ${response.statusText}`);
+  return (data.data?.supSearchMpn?.results || []).map((result) => normalizeExternalCandidate(result.part || result)).filter((item) => item.name || item.mpn);
+}
+
+async function lookupGenericProvider(provider, q, manufacturer) {
+  const cfg = state.externalApiConfig || {};
+  const template = provider === "ultralibrarian" ? cfg.ultraUrlTemplate : cfg.genericUrlTemplate;
+  if (!template) throw new Error(`${provider} URL template is not configured in Settings`);
+  const url = buildTemplateUrl(template, { q, mpn: q, manufacturer });
+  const headers = { Accept: "application/json" };
+  const token = sessionStorage.getItem(STORAGE.externalApiToken);
+  if (token) headers.Authorization = `${cfg.bearerPrefix || "Bearer"} ${token}`.trim();
+  const response = await fetch(url, { headers });
+  if (!response.ok) throw new Error(`${response.status} ${response.statusText}`);
+  const data = await response.json();
+  return extractGenericApiResults(data).map(normalizeExternalCandidate).filter((item) => item.name || item.mpn);
+}
+
+function buildTemplateUrl(template, values) {
+  return String(template).replace(/\{(q|mpn|manufacturer)\}/g, (_, key) => encodeURIComponent(values[key] || ""));
+}
+
+function extractGenericApiResults(data) {
+  if (Array.isArray(data)) return data;
+  const candidates = [data.results, data.items, data.parts, data.data?.results, data.data?.items, data.data?.parts, data.data?.supSearchMpn?.results];
+  const found = candidates.find(Array.isArray);
+  return found || [data];
+}
+
+function normalizeExternalCandidate(raw) {
+  const part = raw?.part || raw || {};
+  const specs = Array.isArray(part.specs) ? part.specs : [];
+  const specMap = Object.fromEntries(specs.map((spec) => {
+    const key = spec.attribute?.shortname || spec.attribute?.name || spec.name || spec.key;
+    const value = spec.displayValue || spec.value || spec.valueText || spec.text;
+    return key ? [String(key).toLowerCase(), value] : null;
+  }).filter(Boolean));
+  const mpn = nullableText(part.mpn ?? part.MPN ?? part.partNumber ?? part.part_number ?? part.manufacturerPartNumber);
+  const manufacturer = nullableText(part.manufacturer?.name ?? part.manufacturer ?? part.mfr ?? part.brand);
+  const description = nullableText(part.shortDescription ?? part.description ?? part.descriptions?.[0]?.text ?? part.summary);
+  const categoryName = inferCategoryFromExternal(part.category?.name ?? part.category ?? part.categoryName ?? description ?? "");
+  const datasheetUrl = nullableText(part.datasheetUrl ?? part.datasheet_url ?? part.datasheet?.url ?? part.datasheets?.[0]?.url);
+  const packageName = nullableText(part.package ?? part.casePackage ?? specMap.package ?? specMap.case_package);
+  const kind = categoryKind(categoryName);
+  const spec = externalSpecFromMap(kind, specMap);
+  return {
+    name: nullableText(part.name) || [mpn, description].filter(Boolean).join(" ") || mpn,
+    manufacturer,
+    mpn,
+    footprint: nullableText(part.footprint ?? part.landPattern ?? part.kicadFootprint),
+    package: packageName,
+    description,
+    datasheetUrl,
+    categoryName,
+    spec,
+    notes: raw ? `Imported from external API. Raw keys: ${Object.keys(raw).slice(0, 12).join(", ")}` : null
+  };
+}
+
+function externalSpecFromMap(kind, specMap) {
+  if (!kind) return null;
+  const pick = (...keys) => keys.map((key) => specMap[key.toLowerCase()]).find((value) => value !== undefined && value !== null && value !== "");
+  if (kind === "resistor") {
+    const resistanceOhm = parseResistance(pick("resistance", "resistance_ohm", "r"));
+    if (resistanceOhm === null) return null;
+    return {
+      resistanceOhm,
+      tolerancePercent: nullableNumber(cleanPercent(pick("tolerance", "tolerance_percent"))),
+      powerW: parsePower(pick("power", "power_w", "power rating")),
+      voltageV: nullableNumber(cleanVoltage(pick("voltage", "voltage_rating")))
+    };
+  }
+  if (kind === "capacitor") {
+    const capacitanceF = parseCapacitance(pick("capacitance", "capacitance_f", "c"));
+    if (capacitanceF === null) return null;
+    return {
+      capacitanceF,
+      voltageV: nullableNumber(cleanVoltage(pick("voltage", "voltage_rating"))),
+      tolerancePercent: nullableNumber(cleanPercent(pick("tolerance", "tolerance_percent"))),
+      dielectric: nullableText(pick("dielectric", "temperature coefficient"))
+    };
+  }
+  if (kind === "inductor") {
+    const inductanceH = parseInductance(pick("inductance", "inductance_h", "l"));
+    if (inductanceH === null) return null;
+    return {
+      inductanceH,
+      currentA: nullableNumber(cleanCurrent(pick("current", "current_rating"))),
+      resistanceOhm: parseResistance(pick("dcr", "dc resistance", "resistance"))
+    };
+  }
+  return null;
+}
+
+function inferCategoryFromExternal(text) {
+  const lower = String(text || "").toLowerCase();
+  if (lower.includes("resistor")) return "resistor";
+  if (lower.includes("capacitor")) return "capacitor";
+  if (lower.includes("inductor")) return "inductor";
+  if (lower.includes("switch")) return "keyswitch";
+  if (lower.includes("connector")) return "connector";
+  if (lower.includes("diode")) return "diode";
+  if (lower.includes("transistor") || lower.includes("mosfet") || lower.includes("bjt")) return "transistor";
+  if (lower.includes("module")) return "module";
+  return "ic";
+}
+
+function categoryIdFromName(name) {
+  if (!name) return null;
+  const wanted = categoryKind(name) || String(name).toLowerCase();
+  return state.inventory.categories.find((category) => category.name.toLowerCase() === wanted)?.id || null;
+}
+
+function ensureCategoryByName(name) {
+  const clean = String(categoryKind(name) || name || "other").toLowerCase().trim();
+  const existing = state.inventory.categories.find((category) => category.name.toLowerCase() === clean);
+  if (existing) return existing.id;
+  const category = { id: nextId(state.inventory.categories), name: clean };
+  state.inventory.categories.push(category);
+  return category.id;
+}
+
+function ensureLocationByPath(name) {
+  const clean = textValue(name);
+  if (!clean) return null;
+  const existing = state.inventory.locations.find((location) => locationPath(location.id).toLowerCase() === clean.toLowerCase() || location.name.toLowerCase() === clean.toLowerCase());
+  if (existing) return existing.id;
+  const location = { id: nextId(state.inventory.locations), name: clean, parentId: null, notes: null };
+  state.inventory.locations.push(location);
+  return location.id;
+}
+
+function firstFilled(...values) {
+  for (const value of values) {
+    if (value !== undefined && value !== null && String(value).trim() !== "") return value;
+  }
+  return "";
+}
+
+function parseResistance(value) {
+  const raw = textValue(value).replace(/Ω|ohms?|ом/gi, "").replace(",", ".");
+  if (!raw) return null;
+  const rNotation = raw.match(/^(\d+(?:\.\d+)?)([rRkKmM])(\d+)$/);
+  if (rNotation) {
+    const base = Number(`${rNotation[1]}.${rNotation[3]}`);
+    const mult = rNotation[2].toLowerCase() === "m" ? 1e6 : rNotation[2].toLowerCase() === "k" ? 1e3 : 1;
+    return base * mult;
+  }
+  const match = raw.match(/^([0-9]*\.?[0-9]+)\s*([mMkKrR]?)$/);
+  if (!match) return null;
+  const valueNum = Number(match[1]);
+  const unit = match[2].toLowerCase();
+  if (!Number.isFinite(valueNum)) return null;
+  if (unit === "m") return valueNum * 1e6;
+  if (unit === "k") return valueNum * 1e3;
+  return valueNum;
+}
+
+function parseCapacitance(value) {
+  const raw = textValue(value).replace("µ", "u").replace(",", ".");
+  if (!raw) return null;
+  if (/^\d{3}$/.test(raw)) return Number(raw.slice(0, 2)) * Math.pow(10, Number(raw[2])) * 1e-12;
+  const match = raw.match(/^([0-9]*\.?[0-9]+)\s*(pf|nf|uf|mf|f)?$/i);
+  if (!match) return null;
+  const n = Number(match[1]);
+  const unit = String(match[2] || "f").toLowerCase();
+  const mult = unit === "pf" ? 1e-12 : unit === "nf" ? 1e-9 : unit === "uf" ? 1e-6 : unit === "mf" ? 1e-3 : 1;
+  return Number.isFinite(n) ? n * mult : null;
+}
+
+function parseInductance(value) {
+  const raw = textValue(value).replace("µ", "u").replace(",", ".");
+  if (!raw) return null;
+  const match = raw.match(/^([0-9]*\.?[0-9]+)\s*(nh|uh|mh|h)?$/i);
+  if (!match) return null;
+  const n = Number(match[1]);
+  const unit = String(match[2] || "h").toLowerCase();
+  const mult = unit === "nh" ? 1e-9 : unit === "uh" ? 1e-6 : unit === "mh" ? 1e-3 : 1;
+  return Number.isFinite(n) ? n * mult : null;
+}
+
+function parsePower(value) {
+  const raw = textValue(value).toLowerCase().replace("w", "").replace(",", ".");
+  if (!raw) return null;
+  if (raw.includes("/")) {
+    const [a, b] = raw.split("/").map(Number);
+    return Number.isFinite(a) && Number.isFinite(b) && b !== 0 ? a / b : null;
+  }
+  const n = Number(raw);
+  return Number.isFinite(n) ? n : null;
+}
+
+function cleanPercent(value) { return textValue(value).replace("%", "").replace(",", "."); }
+function cleanVoltage(value) { return textValue(value).replace(/v$/i, "").replace(",", "."); }
+function cleanCurrent(value) { return textValue(value).replace(/a$/i, "").replace(",", "."); }
+
+function formatResistance(ohm) {
+  const n = Number(ohm);
+  if (!Number.isFinite(n)) return "";
+  if (n >= 1e6) return `${trimNumber(n / 1e6)}M`;
+  if (n >= 1e3) return `${trimNumber(n / 1e3)}k`;
+  return `${trimNumber(n)}R`;
+}
+
+function formatCapacitance(farad) {
+  const n = Number(farad);
+  if (!Number.isFinite(n)) return "";
+  if (n >= 1e-3) return `${trimNumber(n / 1e-3)}mF`;
+  if (n >= 1e-6) return `${trimNumber(n / 1e-6)}uF`;
+  if (n >= 1e-9) return `${trimNumber(n / 1e-9)}nF`;
+  return `${trimNumber(n / 1e-12)}pF`;
+}
+
+function formatInductance(henry) {
+  const n = Number(henry);
+  if (!Number.isFinite(n)) return "";
+  if (n >= 1e-3) return `${trimNumber(n / 1e-3)}mH`;
+  if (n >= 1e-6) return `${trimNumber(n / 1e-6)}uH`;
+  return `${trimNumber(n / 1e-9)}nH`;
+}
+
+function formatPower(watt) {
+  const n = Number(watt);
+  if (!Number.isFinite(n)) return "";
+  return `${trimNumber(n)}W`;
+}
+
+function trimNumber(value) {
+  return Number(value).toFixed(6).replace(/\.0+$/, "").replace(/(\.\d*?)0+$/, "$1");
+}
+
+function openPartModal(partId = null, prefill = null) {
   const part = partId ? state.inventory.parts.find((item) => item.id === partId) : null;
-  const title = part ? "edit part" : "add part";
-  const categoryId = part?.categoryId || state.inventory.categories[0]?.id || 1;
+  const draft = part || prefill || {};
+  const title = part ? "edit part" : (prefill ? "review imported part" : "add part");
+  const categoryId = part?.categoryId || categoryIdFromName(prefill?.categoryName) || state.inventory.categories[0]?.id || 1;
   const categoryName = getCategoryName(categoryId);
   const stockRows = part ? state.inventory.stock.filter((row) => row.partId === part.id) : [];
   const rowHtml = stockRows.length ? stockRows.map(renderStockEditorRow).join("") : renderStockEditorRow(null);
@@ -2448,19 +3124,19 @@ function openPartModal(partId = null) {
       </div>
       <input type="hidden" name="id" value="${part ? part.id : ""}" />
       <div class="form-grid">
-        <div class="field span-2"><label>name</label><input name="name" required value="${escapeAttr(part?.name || "")}" placeholder="100nF 50V X7R 0603" /></div>
+        <div class="field span-2"><label>name</label><input name="name" required value="${escapeAttr(draft?.name || "")}" placeholder="100nF 50V X7R 0603" /></div>
         <div class="field"><label>category</label><select name="categoryId" id="partCategorySelect">${categoryOptions}</select></div>
-        <div class="field"><label>package</label><input name="package" value="${escapeAttr(part?.package || "")}" placeholder="0603, QFN-48, SOT-23" /></div>
-        <div class="field"><label>manufacturer</label><input name="manufacturer" value="${escapeAttr(part?.manufacturer || "")}" placeholder="Texas Instruments" /></div>
-        <div class="field"><label>mpn</label><input name="mpn" value="${escapeAttr(part?.mpn || "")}" placeholder="TPS25751D" /></div>
-        <div class="field"><label>footprint</label><input name="footprint" value="${escapeAttr(part?.footprint || "")}" placeholder="C_0603_1608Metric" /></div>
-        <div class="field"><label>datasheet url</label><input name="datasheetUrl" value="${escapeAttr(part?.datasheetUrl || "")}" placeholder="https://..." /></div>
-        <div class="field span-2"><label>description</label><input name="description" value="${escapeAttr(part?.description || "")}" /></div>
-        <div class="field span-2"><label>notes</label><textarea name="notes">${escapeHtml(part?.notes || "")}</textarea></div>
+        <div class="field"><label>package</label><input name="package" value="${escapeAttr(draft?.package || "")}" placeholder="0603, QFN-48, SOT-23" /></div>
+        <div class="field"><label>manufacturer</label><input name="manufacturer" value="${escapeAttr(draft?.manufacturer || "")}" placeholder="Texas Instruments" /></div>
+        <div class="field"><label>mpn</label><input name="mpn" value="${escapeAttr(draft?.mpn || "")}" placeholder="TPS25751D" /></div>
+        <div class="field"><label>footprint</label><input name="footprint" value="${escapeAttr(draft?.footprint || "")}" placeholder="C_0603_1608Metric" /></div>
+        <div class="field"><label>datasheet url</label><input name="datasheetUrl" value="${escapeAttr(draft?.datasheetUrl || "")}" placeholder="https://..." /></div>
+        <div class="field span-2"><label>description</label><input name="description" value="${escapeAttr(draft?.description || "")}" /></div>
+        <div class="field span-2"><label>notes</label><textarea name="notes">${escapeHtml(draft?.notes || "")}</textarea></div>
       </div>
 
       <p class="section-title">category specific specs</p>
-      <div class="spec-box" id="specFields">${renderSpecFields(part, categoryName)}</div>
+      <div class="spec-box" id="specFields">${renderSpecFields(draft, categoryName)}</div>
 
       <p class="section-title">stock</p>
       <div class="stock-editor" id="stockRows">${rowHtml}</div>
@@ -2481,7 +3157,7 @@ function renderSpecFields(part, categoryName) {
   if (!config) {
     return `<p class="muted">No fixed spec fields for this category. Use notes for unusual parameters.</p>`;
   }
-  const spec = part ? getSpec(part.id, kind) : null;
+  const spec = part?.spec || (part ? getSpec(part.id, kind) : null);
   return `<div class="form-grid">${config.fields.map(([name, label, type]) => {
     const value = spec?.[name] ?? "";
     return `<div class="field"><label>${escapeHtml(label)}</label><input name="spec.${name}" type="${type}" step="any" value="${escapeAttr(value)}" /></div>`;
@@ -3438,6 +4114,7 @@ function saveSettings(form) {
     path: textValue(fd.get("path")) || BUNDLED_DB_PATH
   };
   localStorage.setItem(STORAGE.githubConfig, JSON.stringify(state.githubConfig));
+  saveExternalApiSettings(fd);
   const token = textValue(fd.get("token"));
   if (token) sessionStorage.setItem(STORAGE.token, token);
   setStatus("settings saved");
@@ -3455,8 +4132,31 @@ function captureSettingsFormIfPresent() {
     path: textValue(fd.get("path")) || BUNDLED_DB_PATH
   };
   localStorage.setItem(STORAGE.githubConfig, JSON.stringify(state.githubConfig));
+  saveExternalApiSettings(fd);
   const token = textValue(fd.get("token"));
   if (token) sessionStorage.setItem(STORAGE.token, token);
+}
+
+
+function saveExternalApiSettings(fd) {
+  if (!fd.has("apiProvider")) return;
+  state.externalApiConfig = {
+    provider: textValue(fd.get("apiProvider")) || "nexar",
+    genericUrlTemplate: textValue(fd.get("genericUrlTemplate")),
+    ultraUrlTemplate: textValue(fd.get("ultraUrlTemplate")),
+    bearerPrefix: textValue(fd.get("apiBearerPrefix")) || "Bearer"
+  };
+  localStorage.setItem(STORAGE.externalApiConfig, JSON.stringify(state.externalApiConfig));
+  const externalToken = textValue(fd.get("externalApiToken"));
+  if (externalToken) sessionStorage.setItem(STORAGE.externalApiToken, externalToken);
+}
+
+function externalApiConfigured(provider) {
+  const cfg = state.externalApiConfig || {};
+  if (provider === "nexar") return !!sessionStorage.getItem(STORAGE.externalApiToken);
+  if (provider === "ultralibrarian") return !!cfg.ultraUrlTemplate;
+  if (provider === "generic") return !!cfg.genericUrlTemplate;
+  return false;
 }
 
 function requireGitHubConfig() {
