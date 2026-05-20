@@ -234,6 +234,8 @@ function renderAddImportView() {
             <div class="field"><label>tolerance %</label><input name="defaultTolerance" placeholder="1" /></div>
             <div class="field"><label>power W</label><input name="defaultPower" placeholder="0.1 or 1/10W" /></div>
             <div class="field"><label>voltage V</label><input name="defaultVoltage" placeholder="50" /></div>
+            <div class="field"><label>dielectric</label><input name="defaultDielectric" placeholder="X7R, C0G, NP0" /></div>
+            <div class="field"><label>current A</label><input name="defaultCurrent" placeholder="1.5" /></div>
             <label class="switch-row inline-switch"><span>merge matching existing parts</span><input name="mergeExisting" type="checkbox" checked /></label>
           </div>
 
@@ -241,12 +243,12 @@ function renderAddImportView() {
             <div class="tiny-panel">
               <p class="panel-title">simple rows</p>
               <p><code>value quantity</code></p>
-              <p class="small-note">Example: <code>4.7k 200</code></p>
+              <p class="small-note">Examples: <code>4.7k 200</code>, <code>100N 20</code>, <code>10U 5</code></p>
             </div>
             <div class="tiny-panel">
               <p class="panel-title">optional row fields</p>
               <p><code>value quantity min location source</code></p>
-              <p class="small-note">Use CSV, TSV, semicolon, or spaces.</p>
+              <p class="small-note">Resistors: R/k/M. Capacitors: p/n/u. Inductors: n/u/m or nH/uH/mH.</p>
             </div>
             <div class="tiny-panel">
               <p class="panel-title">headers</p>

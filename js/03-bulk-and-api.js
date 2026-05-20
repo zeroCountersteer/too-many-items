@@ -61,6 +61,8 @@ function parseBulkImportForm(form) {
   const defaultTolerance = nullableNumber(cleanPercent(fd.get("defaultTolerance")));
   const defaultPower = parsePower(fd.get("defaultPower"));
   const defaultVoltage = nullableNumber(cleanVoltage(fd.get("defaultVoltage")));
+  const defaultDielectric = nullableText(fd.get("defaultDielectric"));
+  const defaultCurrent = nullableNumber(cleanCurrent(fd.get("defaultCurrent")));
   const defaultLocationName = nullableText(fd.get("defaultLocationName"));
   const defaultLocationId = defaultLocationName ? ensureLocationByPath(defaultLocationName) : nullableNumber(fd.get("defaultLocationId"));
   const text = textValue(fd.get("bulkText"));
@@ -79,7 +81,7 @@ function parseBulkImportForm(form) {
     }
     const data = header ? rowFromHeader(cells, header) : rowFromPositional(cells, kind);
     try {
-      const built = buildBulkRow({ data, kind, defaultPackage, defaultFootprint, defaultQuantity, defaultMin, defaultSource, defaultTolerance, defaultPower, defaultVoltage, defaultLocationId, now });
+      const built = buildBulkRow({ data, kind, defaultPackage, defaultFootprint, defaultQuantity, defaultMin, defaultSource, defaultTolerance, defaultPower, defaultVoltage, defaultDielectric, defaultCurrent, defaultLocationId, now });
       rows.push(built);
     } catch (error) {
       errors.push(`${line}: ${error.message}`);
@@ -129,14 +131,14 @@ function buildBulkRow(ctx) {
     if (farad === null) throw new Error("capacitance value is missing or invalid");
     const voltage = nullableNumber(cleanVoltage(data.voltage)) ?? ctx.defaultVoltage;
     const tolerance = nullableNumber(cleanPercent(data.tolerance)) ?? ctx.defaultTolerance;
-    const dielectric = nullableText(data.dielectric);
+    const dielectric = nullableText(data.dielectric) || ctx.defaultDielectric;
     spec = { partId: 0, capacitanceF: farad, voltageV: voltage ?? undefined, tolerancePercent: tolerance ?? undefined, dielectric: dielectric ?? undefined };
     specText = [formatCapacitance(farad), voltage != null ? `${voltage}V` : "", dielectric || ""].filter(Boolean).join(" ");
     basePart.name = nullableText(data.name) || [formatCapacitance(farad), voltage != null ? `${voltage}V` : null, dielectric, packageName].filter(Boolean).join(" ");
   } else if (kind === "inductor") {
     const henry = parseInductance(data.value ?? data.inductance ?? data.inductanceH);
     if (henry === null) throw new Error("inductance value is missing or invalid");
-    const current = nullableNumber(cleanCurrent(data.current));
+    const current = nullableNumber(cleanCurrent(data.current)) ?? ctx.defaultCurrent;
     const dcr = parseResistance(data.dcr ?? data.resistance ?? data.resistanceOhm);
     spec = { partId: 0, inductanceH: henry, currentA: current ?? undefined, resistanceOhm: dcr ?? undefined };
     specText = [formatInductance(henry), current != null ? `${current}A` : ""].filter(Boolean).join(" ");
@@ -301,48 +303,47 @@ function parseResistance(value) {
   return valueNum;
 }
 
-function parseCapacitance(value) {
+function parseEngineeringNumber(input, units, defaultUnit = "") {
+  const text = textValue(input)
+    .replace("µ", "u")
+    .replace("μ", "u")
+    .replace(",", ".")
+    .trim()
+    .toUpperCase();
+  if (!text) return null;
 
-  const text =
-  String(value)
-  .trim()
-  .toUpperCase();
+  const rNotation = text.match(/^([0-9]*\.?[0-9]+)([A-Z]+)([0-9]+)$/);
+  if (rNotation && units[rNotation[2]] !== undefined) {
+    const number = Number(`${rNotation[1]}.${rNotation[3]}`);
+    return Number.isFinite(number) ? number * units[rNotation[2]] : null;
+  }
 
-  const match =
-  text.match(/^([0-9]*\.?[0-9]+)\s*(P|N|U|UF|NF|PF)?$/);
-
+  const match = text.match(/^([0-9]*\.?[0-9]+)\s*([A-Z]+)?$/);
   if (!match) return null;
 
   const number = Number(match[1]);
-  const unit = match[2] || "P";
-
-  switch (unit) {
-
-    case "P":
-    case "PF":
-      return number * 1e-12;
-
-    case "N":
-    case "NF":
-      return number * 1e-9;
-
-    case "U":
-    case "UF":
-      return number * 1e-6;
-
-    default:
-      return null;
-  }
+  const unit = match[2] || defaultUnit;
+  if (!Number.isFinite(number) || units[unit] === undefined) return null;
+  return number * units[unit];
 }
+
+function parseCapacitance(value) {
+  return parseEngineeringNumber(value, {
+    P: 1e-12, PF: 1e-12,
+    N: 1e-9, NF: 1e-9,
+    U: 1e-6, UF: 1e-6,
+    M: 1e-3, MF: 1e-3,
+    F: 1
+  }, "P");
+}
+
 function parseInductance(value) {
-  const raw = textValue(value).replace("µ", "u").replace(",", ".");
-  if (!raw) return null;
-  const match = raw.match(/^([0-9]*\.?[0-9]+)\s*(nh|uh|mh|h)?$/i);
-  if (!match) return null;
-  const n = Number(match[1]);
-  const unit = String(match[2] || "h").toLowerCase();
-  const mult = unit === "nh" ? 1e-9 : unit === "uh" ? 1e-6 : unit === "mh" ? 1e-3 : 1;
-  return Number.isFinite(n) ? n * mult : null;
+  return parseEngineeringNumber(value, {
+    N: 1e-9, NH: 1e-9,
+    U: 1e-6, UH: 1e-6,
+    M: 1e-3, MH: 1e-3,
+    H: 1
+  }, "H");
 }
 
 function parsePower(value) {
