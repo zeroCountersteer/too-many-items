@@ -201,17 +201,27 @@ function openLocationModal(locationId = null) {
       .filter((item) => item.id !== locationId)
       .map((item) => `<option value="${item.id}" ${location?.parentId === item.id ? "selected" : ""}>${escapeHtml(locationPath(item.id))}</option>`)
   ).join("");
+  const typeOptions = LOCATION_TYPES.map((type) => `<option value="${escapeAttr(type)}" ${(location?.type || "bin") === type ? "selected" : ""}>${escapeHtml(type)}</option>`).join("");
 
   openModal(`
     <form id="locationForm" class="modal-card" novalidate>
       <div class="modal-head">
-        <div><p class="path-line">inventory / location editor</p><h3>${location ? "edit location" : "add location"}</h3></div>
+        <div><p class="path-line">inventory / storage editor</p><h3>${location ? "edit location" : "add location"}</h3></div>
         <button type="button" class="icon-button" data-action="close-modal">×</button>
       </div>
       <input type="hidden" name="id" value="${location ? location.id : ""}" />
       <div class="form-grid">
-        <div class="field"><label>name</label><input name="name" required value="${escapeAttr(location?.name || "")}" placeholder="A01 capacitors" /></div>
+        <div class="field"><label>name</label><input name="name" required value="${escapeAttr(location?.name || "")}" placeholder="drawer A / bin 01" /></div>
+        <div class="field"><label>type</label><select name="type">${typeOptions}</select></div>
         <div class="field"><label>parent</label><select name="parentId">${parentOptions}</select></div>
+        <div class="field"><label>capacity</label><input name="capacity" type="number" min="0" step="1" value="${escapeAttr(location?.capacity ?? "")}" placeholder="1000" /></div>
+        <div class="field"><label>x</label><input name="x" type="number" step="1" value="${escapeAttr(location?.x ?? "")}" /></div>
+        <div class="field"><label>y</label><input name="y" type="number" step="1" value="${escapeAttr(location?.y ?? "")}" /></div>
+        <div class="field"><label>z</label><input name="z" type="number" step="1" value="${escapeAttr(location?.z ?? "")}" /></div>
+        <div class="field"><label>color</label><input name="color" value="${escapeAttr(location?.color || "")}" placeholder="#8fc9ff" /></div>
+        <div class="field"><label>LED node</label><input name="ledNode" value="${escapeAttr(location?.ledNode || "")}" placeholder="esp32-storage-1" /></div>
+        <div class="field"><label>LED index</label><input name="ledIndex" type="number" step="1" value="${escapeAttr(location?.ledIndex ?? "")}" /></div>
+        <div class="field span-2"><label>network highlight target</label><input name="networkTarget" value="${escapeAttr(location?.networkTarget || "")}" placeholder="http://storage-node.local/highlight" /></div>
         <div class="field span-2"><label>notes</label><textarea name="notes">${escapeHtml(location?.notes || "")}</textarea></div>
       </div>
       <div class="form-actions">
@@ -230,7 +240,16 @@ function saveLocationFromForm(form) {
   const location = {
     id,
     name: textValue(fd.get("name")),
+    type: textValue(fd.get("type")) || "bin",
     parentId: parentRaw ? Number(parentRaw) : null,
+    capacity: nullableNumber(fd.get("capacity")),
+    x: nullableNumber(fd.get("x")),
+    y: nullableNumber(fd.get("y")),
+    z: nullableNumber(fd.get("z")),
+    color: nullableText(fd.get("color")),
+    ledNode: nullableText(fd.get("ledNode")),
+    ledIndex: nullableNumber(fd.get("ledIndex")),
+    networkTarget: nullableText(fd.get("networkTarget")),
     notes: nullableText(fd.get("notes"))
   };
 
@@ -301,5 +320,57 @@ function openModal(html) {
 
 function closeModal() {
   $("#modalRoot").innerHTML = "";
+}
+
+
+
+function openBomRowModal(rowId) {
+  const row = state.inventory.projectBom.find((item) => item.id === Number(rowId));
+  if (!row) return;
+  const partOptions = [`<option value="">unresolved</option>`].concat(
+    state.inventory.parts.map((part) => `<option value="${part.id}" ${row.partId === part.id ? "selected" : ""}>${escapeHtml(part.name)}</option>`)
+  ).join("");
+  openModal(`
+    <form id="bomRowForm" class="modal-card" novalidate>
+      <div class="modal-head">
+        <div><p class="path-line">project / BOM row</p><h3>edit BOM row</h3></div>
+        <button type="button" class="icon-button" data-action="close-modal">×</button>
+      </div>
+      <input type="hidden" name="id" value="${row.id}" />
+      <div class="form-grid">
+        <div class="field"><label>references</label><input name="referencesText" value="${escapeAttr(row.referencesText || "")}" /></div>
+        <div class="field"><label>value</label><input name="value" value="${escapeAttr(row.value || "")}" /></div>
+        <div class="field"><label>footprint</label><input name="footprint" value="${escapeAttr(row.footprint || "")}" /></div>
+        <div class="field"><label>mpn</label><input name="mpn" value="${escapeAttr(row.mpn || "")}" /></div>
+        <div class="field"><label>quantity</label><input name="quantity" type="number" min="0" step="1" value="${escapeAttr(row.quantity || 0)}" /></div>
+        <div class="field"><label>matched part</label><select name="partId">${partOptions}</select></div>
+        <label class="switch-row inline-switch"><span>fitted</span><input name="fitted" type="checkbox" ${row.fitted === 0 ? "" : "checked"} /></label>
+        <div class="field span-2"><label>notes</label><textarea name="notes">${escapeHtml(row.notes || "")}</textarea></div>
+      </div>
+      <div class="form-actions">
+        <button type="button" class="ghost-button" data-action="close-modal">cancel</button>
+        <button type="button" class="primary-button" data-action="save-bom-row">save BOM row</button>
+      </div>
+    </form>
+  `);
+}
+
+function saveBomRowFromForm(form) {
+  const fd = new FormData(form);
+  const row = state.inventory.projectBom.find((item) => item.id === Number(fd.get("id")));
+  if (!row) return;
+  row.referencesText = nullableText(fd.get("referencesText"));
+  row.value = nullableText(fd.get("value"));
+  row.footprint = nullableText(fd.get("footprint"));
+  row.mpn = nullableText(fd.get("mpn"));
+  row.quantity = integerOrZero(fd.get("quantity"));
+  row.partId = fd.get("partId") ? Number(fd.get("partId")) : null;
+  row.fitted = fd.get("fitted") === "on" ? 1 : 0;
+  row.notes = nullableText(fd.get("notes"));
+  logActivity("edit-bom-row", "project_bom", row.id, row.value || row.referencesText || "");
+  touchInventory();
+  if (!persistDatabase("BOM row updated", { dirty: true })) return;
+  closeModal();
+  render();
 }
 

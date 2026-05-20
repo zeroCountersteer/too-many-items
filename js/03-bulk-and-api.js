@@ -65,7 +65,7 @@ function parseBulkImportForm(form) {
   const defaultCurrent = nullableNumber(cleanCurrent(fd.get("defaultCurrent")));
   const defaultLocationName = nullableText(fd.get("defaultLocationName"));
   const defaultLocationId = defaultLocationName ? ensureLocationByPath(defaultLocationName) : nullableNumber(fd.get("defaultLocationId"));
-  const text = textValue(fd.get("bulkText"));
+  const text = textValue(fd.get("bulkText")) || bulkGridToText(form);
   const errors = [];
   const rows = [];
   if (!text) return { rows, errors: ["bulk text is empty"] };
@@ -81,7 +81,7 @@ function parseBulkImportForm(form) {
     }
     const data = header ? rowFromHeader(cells, header) : rowFromPositional(cells, kind);
     try {
-      const built = buildBulkRow({ data, kind, defaultPackage, defaultFootprint, defaultQuantity, defaultMin, defaultSource, defaultTolerance, defaultPower, defaultVoltage, defaultDielectric, defaultCurrent, defaultLocationId, now });
+      const built = buildBulkRow({ data, kind, defaultPackage, defaultFootprint, defaultQuantity, defaultMin, defaultSource, defaultTolerance, defaultPower, defaultVoltage, defaultDielectric, defaultCurrent, defaultLocationId, defaultDielectric, defaultCurrent, now });
       rows.push(built);
     } catch (error) {
       errors.push(`${line}: ${error.message}`);
@@ -394,5 +394,178 @@ function formatPower(watt) {
 
 function trimNumber(value) {
   return Number(value).toFixed(6).replace(/\.0+$/, "").replace(/(\.\d*?)0+$/, "$1");
+}
+
+
+
+function bulkGridToText(form) {
+  const rows = [...form.querySelectorAll(".bulk-line")].map((line) => {
+    const value = line.querySelector("[name^='bulkValue_']")?.value || "";
+    const qty = line.querySelector("[name^='bulkQty_']")?.value || "";
+    const min = line.querySelector("[name^='bulkMin_']")?.value || "";
+    const location = line.querySelector("[name^='bulkLocation_']")?.value || "";
+    const source = line.querySelector("[name^='bulkSource_']")?.value || "";
+    return [value, qty, min, location, source].filter((cell, idx) => idx < 2 || String(cell).trim()).join(" ");
+  }).filter((line) => line.trim());
+  return rows.join("\n");
+}
+
+function updateBulkPreviewFromGrid() {
+  const form = $("#bulkImportForm");
+  if (!form) return;
+  const hidden = form.querySelector("[name='bulkText']");
+  if (hidden) hidden.value = bulkGridToText(form);
+}
+
+function addBulkLine(row = {}) {
+  const grid = $("#bulkGrid");
+  if (!grid) return;
+  const index = grid.querySelectorAll(".bulk-line").length;
+  grid.insertAdjacentHTML("beforeend", renderBulkLine(index, row));
+  updateBulkPreviewFromGrid();
+}
+
+function cloneBulkLine(index) {
+  const grid = $("#bulkGrid");
+  if (!grid) return;
+  const lines = [...grid.querySelectorAll(".bulk-line")];
+  const src = lines[Number(index)] || lines[lines.length - 1];
+  const row = src ? {
+    value: src.querySelector("[name^='bulkValue_']")?.value || "",
+    quantity: src.querySelector("[name^='bulkQty_']")?.value || "",
+    min: src.querySelector("[name^='bulkMin_']")?.value || "",
+    location: src.querySelector("[name^='bulkLocation_']")?.value || "",
+    source: src.querySelector("[name^='bulkSource_']")?.value || ""
+  } : {};
+  addBulkLine(row);
+}
+
+function removeBulkLine(index) {
+  const grid = $("#bulkGrid");
+  const lines = grid ? [...grid.querySelectorAll(".bulk-line")] : [];
+  if (lines.length <= 1) return;
+  lines[Number(index)]?.remove();
+  [...grid.querySelectorAll(".bulk-line")].forEach((line, i) => {
+    line.dataset.bulkRow = String(i);
+    line.querySelectorAll("input").forEach((input) => {
+      input.name = input.name.replace(/_\d+$/, `_${i}`);
+    });
+    line.querySelectorAll("[data-id]").forEach((button) => button.dataset.id = String(i));
+  });
+  updateBulkPreviewFromGrid();
+}
+
+function generateBulkSeries() {
+  const form = $("#bulkImportForm");
+  const grid = $("#bulkGrid");
+  if (!form || !grid) return;
+  const fd = new FormData(form);
+  const series = E_SERIES[String(fd.get("seriesName") || "E24")] || E_SERIES.E24;
+  const decades = String(fd.get("seriesDecades") || "1k,10k,100k").split(/[,;\s]+/).map(parseResistance).filter((n) => n && Number.isFinite(n));
+  const qty = integerOrZero(fd.get("seriesQty")) || integerOrZero(fd.get("defaultQuantity")) || 1;
+  if (fd.get("seriesReplace") === "replace") grid.innerHTML = "";
+  const values = [];
+  decades.forEach((base) => {
+    const decade = Math.pow(10, Math.floor(Math.log10(base)));
+    series.forEach((v) => {
+      const ohm = v * decade;
+      if (ohm >= Math.min(...decades) && ohm <= Math.max(...decades)) values.push(ohm);
+    });
+  });
+  [...new Set(values.map((v) => Math.round(v * 1000000) / 1000000))]
+    .sort((a, b) => a - b)
+    .forEach((ohm) => addBulkLine({ value: formatResistance(ohm), quantity: qty }));
+  updateBulkPreviewFromGrid();
+  previewBulkImport();
+}
+
+function importKiCadBomFromForm() {
+  const form = $("#kicadBomForm");
+  if (!form) return;
+  const fd = new FormData(form);
+  const csv = textValue(fd.get("bomCsv"));
+  if (!csv) {
+    toast("BOM CSV is empty", "error");
+    return;
+  }
+  const rows = parseCsvTable(csv);
+  if (!rows.length) {
+    toast("no BOM rows parsed", "error");
+    return;
+  }
+  const projectId = nextId(state.inventory.projects || []);
+  const now = new Date().toISOString();
+  const project = {
+    id: projectId,
+    name: textValue(fd.get("projectName")) || "KiCad project",
+    revision: nullableText(fd.get("revision")),
+    sourceFile: "pasted KiCad BOM",
+    createdAt: now,
+    updatedAt: now,
+    notes: null
+  };
+  state.inventory.projects = state.inventory.projects || [];
+  state.inventory.projectBom = state.inventory.projectBom || [];
+  state.inventory.projects.push(project);
+  rows.forEach((row) => {
+    const normalized = normalizeBomRow(row);
+    const match = findPartForBom(normalized) || findBestPartForBomRow(normalized);
+    state.inventory.projectBom.push({
+      id: nextId(state.inventory.projectBom),
+      projectId,
+      partId: match?.id || null,
+      value: normalized.value,
+      footprint: normalized.footprint,
+      mpn: normalized.mpn,
+      referencesText: normalized.references,
+      quantity: normalized.quantity,
+      fitted: 1,
+      notes: match ? null : "unresolved"
+    });
+  });
+  const auto = autoMatchProject(projectId);
+  logActivity("import-kicad-bom", "project", projectId, `${rows.length} rows, ${auto} auto-matched`);
+  touchInventory();
+  if (!persistDatabase("KiCad BOM imported", { dirty: true })) return;
+  toast(`project BOM stored: ${project.name}`);
+  setView("database");
+}
+
+function parseCsvTable(text) {
+  const lines = text.split(/\r?\n/).filter((line) => line.trim());
+  if (!lines.length) return [];
+  const header = parseSimpleCsvLine(lines[0], lines[0].includes(";") ? ";" : ",").map(normalizeHeaderName);
+  return lines.slice(1).map((line) => {
+    const cells = parseSimpleCsvLine(line, line.includes(";") ? ";" : ",");
+    const obj = {};
+    header.forEach((name, i) => obj[headerAlias(name)] = cells[i] || "");
+    return obj;
+  });
+}
+
+function normalizeBomRow(row) {
+  const references = row.references || row.designator || row.ref || row.refs || "";
+  const refs = String(references).split(/[,\s]+/).filter(Boolean);
+  return {
+    value: nullableText(row.value || row.designation || row.name),
+    footprint: nullableText(row.footprint || row.package),
+    mpn: nullableText(row.mpn || row.part_number || row.supplier_and_ref),
+    references: nullableText(references),
+    quantity: integerOrZero(row.quantity || row.qty || refs.length || 1)
+  };
+}
+
+function findPartForBom(row) {
+  const mpn = String(row.mpn || "").toLowerCase();
+  if (mpn) {
+    const direct = state.inventory.parts.find((part) => String(part.mpn || "").toLowerCase() === mpn);
+    if (direct) return direct;
+  }
+  const value = String(row.value || "").toLowerCase();
+  const fp = String(row.footprint || "").toLowerCase();
+  return state.inventory.parts.find((part) => {
+    return (!value || String(part.name || "").toLowerCase().includes(value)) &&
+      (!fp || String(part.footprint || part.package || "").toLowerCase().includes(fp));
+  }) || null;
 }
 

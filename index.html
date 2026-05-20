@@ -3,11 +3,11 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>Too Many Items // Inventory</title>
-  <meta name="description" content="Static GitHub-backed SQLite inventory for electronic components." />
+  <title>Inventory v16 // Repository</title>
+  <meta name="description" content="Static GitHub-backed SQLite inventory." />
   <link rel="stylesheet" href="style.css" />
 </head>
-<body class="moving-bg" data-app-ready="false">
+<body class="no-motion" data-app-ready="false">
   <div class="ambient" aria-hidden="true">
     <span class="cloud cloud-a"></span>
     <span class="cloud cloud-b"></span>
@@ -19,16 +19,17 @@
     <aside class="navi-card" aria-label="Navigation">
       <div class="navi-head">
         <div>
-          <p class="eyebrow">nAVI</p>
-          <h1>Too<br />Many<br />Items</h1>
+          <p class="eyebrow">repository</p>
+          <h1 id="ownerHeader">inventory</h1>
         </div>
       </div>
 
       <nav class="navi-menu" id="navMenu">
-        <button type="button" class="nav-button" data-view="parts">HOME / INVENTORY</button>
-        <button type="button" class="nav-button" data-view="add">ADD / IMPORT</button>
-        <button type="button" class="nav-button" data-view="locations">LOCATIONS / MAP</button>
-        <button type="button" class="nav-button" data-view="database">DATABASE</button>
+        <button type="button" class="nav-button" data-view="parts">INVENTORY</button>
+        <button type="button" class="nav-button" data-view="add">ADD</button>
+        <button type="button" class="nav-button" data-view="locations">LOCATIONS</button>
+        <button type="button" class="nav-button" data-view="projects">PROJECTS / BOM</button>
+        <button type="button" class="nav-button" data-view="database">STATS / DB</button>
         <button type="button" class="nav-button" data-view="settings">SETTINGS</button>
       </nav>
 
@@ -68,13 +69,13 @@
   </noscript>
 
   <script src="https://cdn.jsdelivr.net/npm/sql.js@1.10.3/dist/sql-wasm.js"></script>
-  <script src="js/00-config.js?v=13"></script>
-  <script src="js/06-inventory-model.js?v=13"></script>
-  <script src="js/05-database.js?v=13"></script>
-  <script src="js/07-theme-utils.js?v=13"></script>
-  <script src="js/02-render.js?v=13"></script>
-  <script src="js/04-editors.js?v=13"></script>
-  <script src="js/03-bulk-and-api.js?v=13"></script>
-  <script src="js/01-core-events.js?v=13"></script>
+  <script src="js/00-config.js?v=16"></script>
+  <script src="js/06-inventory-model.js?v=16"></script>
+  <script src="js/05-database.js?v=16"></script>
+  <script src="js/07-theme-utils.js?v=16"></script>
+  <script src="js/02-render.js?v=16"></script>
+  <script src="js/04-editors.js?v=16"></script>
+  <script src="js/03-bulk-and-api.js?v=16"></script>
+  <script src="js/01-core-events.js?v=16"></script>
 </body>
 </html>

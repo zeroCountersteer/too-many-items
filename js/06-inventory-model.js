@@ -4,6 +4,9 @@ function filteredParts() {
   const query = String(state.query || "").trim().toLowerCase();
   const packageQuery = String(state.packageFilter || "").trim().toLowerCase();
   const stockFilter = state.stockFilter || "all";
+  const specMin = parseSpecFilterValue(state.specFilterMin);
+  const specMax = parseSpecFilterValue(state.specFilterMax);
+  const extra = String(state.specFilterExtra || "").trim().toLowerCase();
 
   const filtered = state.inventory.parts
     .filter((part) => state.categoryFilter === "all" || String(part.categoryId) === String(state.categoryFilter))
@@ -17,6 +20,15 @@ function filteredParts() {
       if (stockFilter === "zero") return stock.total <= 0;
       if (stockFilter === "low") return stock.min > 0 && stock.total <= stock.min;
       if (stockFilter === "no-location") return state.inventory.stock.some((row) => row.partId === part.id && !row.locationId);
+      return true;
+    })
+    .filter((part) => {
+      if (specMin == null && specMax == null && !extra) return true;
+      const primary = primarySpecValue(part);
+      if ((specMin != null || specMax != null) && primary == null) return false;
+      if (specMin != null && primary < specMin) return false;
+      if (specMax != null && primary > specMax) return false;
+      if (extra && !specSummary(part).toLowerCase().includes(extra)) return false;
       return true;
     })
     .filter((part) => {
@@ -53,6 +65,9 @@ function filteredParts() {
     else if (sortKey === "package") result = compareText(a.package || a.footprint, b.package || b.footprint) || compareText(a.name, b.name);
     else if (sortKey === "quantity") result = compareNumber(stockA.total, stockB.total) || compareText(a.name, b.name);
     else if (sortKey === "location") result = compareText(stockA.locations, stockB.locations) || compareText(a.name, b.name);
+    else if (sortKey === "value" || sortKey === "spec") result = compareNumber(primarySpecValue(a), primarySpecValue(b)) || compareText(a.name, b.name);
+    else if (sortKey === "voltage") result = compareNumber(specNumericField(a, "voltageV"), specNumericField(b, "voltageV")) || compareText(a.name, b.name);
+    else if (sortKey === "tolerance") result = compareNumber(specNumericField(a, "tolerancePercent"), specNumericField(b, "tolerancePercent")) || compareText(a.name, b.name);
     else result = compareText(a.name, b.name);
     return result * direction;
   });
@@ -73,8 +88,44 @@ function specSummary(part) {
   if (!kind) return "";
   const spec = getSpec(part.id, kind);
   if (!spec) return "";
+  if (kind === "resistor") return [formatResistance(spec.resistanceOhm), spec.tolerancePercent != null ? `${trimNumber(spec.tolerancePercent)}%` : "", spec.powerW != null ? formatPower(spec.powerW) : ""].filter(Boolean).join(" ");
+  if (kind === "capacitor") return [formatCapacitance(spec.capacitanceF), spec.voltageV != null ? `${trimNumber(spec.voltageV)}V` : "", spec.dielectric || ""].filter(Boolean).join(" ");
+  if (kind === "inductor") return [formatInductance(spec.inductanceH), spec.currentA != null ? `${trimNumber(spec.currentA)}A` : ""].filter(Boolean).join(" ");
   const pairs = Object.entries(spec).filter(([key, value]) => key !== "partId" && value !== null && value !== undefined && value !== "");
   return pairs.slice(0, 3).map(([key, value]) => `${key}: ${value}`).join(" / ");
+}
+
+function primarySpecValue(part) {
+  const kind = categoryKind(getCategoryName(part.categoryId));
+  const spec = kind ? getSpec(part.id, kind) : null;
+  if (!spec) return null;
+  if (kind === "resistor") return numberOrNull(spec.resistanceOhm);
+  if (kind === "capacitor") return numberOrNull(spec.capacitanceF);
+  if (kind === "inductor") return numberOrNull(spec.inductanceH);
+  return null;
+}
+
+function specNumericField(part, field) {
+  const kind = categoryKind(getCategoryName(part.categoryId));
+  const spec = kind ? getSpec(part.id, kind) : null;
+  return spec ? numberOrNull(spec[field]) : null;
+}
+
+function parseSpecFilterValue(value) {
+  const raw = textValue(value);
+  if (!raw) return null;
+  const category = state.categoryFilter !== "all" ? getCategoryName(Number(state.categoryFilter)) : "";
+  const kind = categoryKind(category);
+  if (kind === "resistor") return parseResistance(raw);
+  if (kind === "capacitor") return parseCapacitance(raw);
+  if (kind === "inductor") return parseInductance(raw);
+  const n = Number(raw.replace(",", "."));
+  return Number.isFinite(n) ? n : null;
+}
+
+function numberOrNull(value) {
+  const n = Number(value);
+  return Number.isFinite(n) ? n : null;
 }
 
 function getSpec(partId, kind) {
@@ -141,7 +192,12 @@ function createEmptyInventory() {
     icSpecs: [],
     keyswitchSpecs: [],
     stock: [],
-    attributes: []
+    attributes: [],
+    projects: [],
+    projectBom: [],
+    partAliases: [],
+    projectReservations: [],
+    activityLog: []
   };
 }
 
@@ -160,6 +216,11 @@ function normalizeInventory(raw) {
   inv.icSpecs = normalizeSpecs(raw.icSpecs || raw.ic_specs || [], "ic");
   inv.keyswitchSpecs = normalizeSpecs(raw.keyswitchSpecs || raw.keyswitch_specs || raw.keyswitch_spec || [], "keyswitch");
   inv.attributes = normalizeAttributes(raw.attributes || []);
+  inv.projects = normalizeProjects(raw.projects || []);
+  inv.projectBom = normalizeProjectBom(raw.projectBom || raw.project_bom || []);
+  inv.partAliases = normalizePartAliases(raw.partAliases || raw.part_aliases || []);
+  inv.projectReservations = normalizeProjectReservations(raw.projectReservations || raw.project_reservations || []);
+  inv.activityLog = normalizeActivityLog(raw.activityLog || raw.activity_log || []);
   ensureInventoryShape(inv);
   normalizeReferences(inv);
   return inv;
@@ -171,7 +232,7 @@ function ensureInventoryShape(inv) {
   inv.meta.app = inv.meta.app || "too-many-items";
   inv.meta.createdAt = inv.meta.createdAt || new Date().toISOString();
   inv.meta.updatedAt = inv.meta.updatedAt || inv.meta.createdAt;
-  ["categories", "locations", "parts", "stock", "resistorSpecs", "capacitorSpecs", "inductorSpecs", "icSpecs", "keyswitchSpecs", "attributes"].forEach((key) => {
+  ["categories", "locations", "parts", "stock", "resistorSpecs", "capacitorSpecs", "inductorSpecs", "icSpecs", "keyswitchSpecs", "attributes", "projects", "projectBom", "partAliases", "projectReservations", "activityLog"].forEach((key) => {
     if (!Array.isArray(inv[key])) inv[key] = [];
   });
   if (!inv.categories.length) inv.categories = DEFAULT_CATEGORIES.map((name, index) => ({ id: index + 1, name }));
@@ -210,13 +271,22 @@ function normalizeCategories(items) {
   return result;
 }
 
-function normalizeLocations(items) {
-  return items.map((item, index) => ({
-    id: Number(item.id || index + 1),
-    name: textValue(item.name || item.Name || `location_${index + 1}`),
-    parentId: nullableNumber(item.parentId ?? item.parent_id),
-    notes: nullableText(item.notes)
-  })).filter((item) => item.name);
+function normalizeLocations(rows) {
+  return (rows || []).map((row) => ({
+    id: integerOrZero(row.id),
+    name: textValue(row.name) || "location",
+    type: textValue(row.type) || "bin",
+    parentId: row.parentId ?? row.parent_id ?? null,
+    capacity: nullableNumber(row.capacity),
+    x: nullableNumber(row.x),
+    y: nullableNumber(row.y),
+    z: nullableNumber(row.z),
+    color: nullableText(row.color),
+    ledNode: nullableText(row.ledNode ?? row.led_node),
+    ledIndex: nullableNumber(row.ledIndex ?? row.led_index),
+    networkTarget: nullableText(row.networkTarget ?? row.network_target),
+    notes: nullableText(row.notes)
+  })).filter((row) => row.id > 0);
 }
 
 function normalizeParts(items) {
@@ -519,3 +589,368 @@ Object.assign(window, {
   githubRequest,
   encodePath
 });
+
+function normalizeProjects(rows) {
+  return (rows || []).map((row) => ({
+    id: integerOrZero(row.id),
+    name: textValue(row.name) || "project",
+    revision: nullableText(row.revision),
+    sourceFile: nullableText(row.sourceFile ?? row.source_file),
+    createdAt: row.createdAt || row.created_at || new Date().toISOString(),
+    updatedAt: row.updatedAt || row.updated_at || null,
+    notes: nullableText(row.notes)
+  })).filter((row) => row.id > 0);
+}
+
+function normalizeProjectBom(rows) {
+  return (rows || []).map((row) => ({
+    id: integerOrZero(row.id),
+    projectId: integerOrZero(row.projectId ?? row.project_id),
+    partId: row.partId ?? row.part_id ?? null,
+    value: nullableText(row.value),
+    footprint: nullableText(row.footprint),
+    mpn: nullableText(row.mpn),
+    referencesText: nullableText(row.referencesText ?? row.references_text),
+    quantity: integerOrZero(row.quantity ?? row.qty),
+    fitted: row.fitted === 0 ? 0 : 1,
+    notes: nullableText(row.notes)
+  })).filter((row) => row.id > 0 && row.projectId > 0);
+}
+
+function saveVisibleColumns() {
+  const columns = (state.visibleColumns || DEFAULT_PART_COLUMNS).filter((item, index, arr) => PART_COLUMN_DEFS[item] !== undefined && arr.indexOf(item) === index);
+  state.visibleColumns = columns.length ? columns : DEFAULT_PART_COLUMNS.slice();
+  localStorage.setItem(STORAGE.visibleColumns || "tmi.visibleColumns", JSON.stringify(state.visibleColumns));
+  setStatus("parts columns updated");
+}
+
+function storageStats() {
+  const byLocation = state.inventory.locations.map((location) => {
+    const rows = state.inventory.stock.filter((row) => row.locationId === location.id);
+    const quantity = rows.reduce((sum, row) => sum + numberOrZero(row.quantity), 0);
+    const capacity = numberOrZero(location.capacity);
+    return { location, rows: rows.length, quantity, capacity, fill: capacity ? Math.min(100, Math.round(quantity / capacity * 100)) : null };
+  });
+  const orphanRows = state.inventory.stock.filter((row) => !row.locationId).length;
+  return { byLocation, orphanRows };
+}
+
+function categoryStats() {
+  const total = Math.max(1, state.inventory.parts.length);
+  return state.inventory.categories
+    .map((category) => ({ category, count: state.inventory.parts.filter((part) => part.categoryId === category.id).length }))
+    .filter((row) => row.count > 0)
+    .sort((a, b) => b.count - a.count || a.category.name.localeCompare(b.category.name))
+    .map((row) => ({ ...row, percent: Math.round(row.count / total * 100) }));
+}
+
+function projectStats() {
+  return {
+    projects: state.inventory.projects?.length || 0,
+    bomRows: state.inventory.projectBom?.length || 0,
+    unresolved: (state.inventory.projectBom || []).filter((row) => !row.partId).length
+  };
+}
+
+function highlightLocation(locationId) {
+  const location = state.inventory.locations.find((item) => item.id === Number(locationId));
+  if (!location) return;
+  const payload = {
+    id: location.id,
+    path: locationPath(location.id),
+    ledNode: location.ledNode || null,
+    ledIndex: location.ledIndex ?? null,
+    networkTarget: location.networkTarget || null
+  };
+  console.log("highlightLocation", payload);
+  if (location.networkTarget) {
+    fetch(location.networkTarget, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload)
+    }).catch((error) => console.warn("location highlight request failed", error));
+  }
+  toast(`highlight: ${locationPath(location.id)}`);
+}
+
+
+window.primarySpecValue = primarySpecValue;
+
+window.parseSpecFilterValue = parseSpecFilterValue;
+
+window.storageStats = storageStats;
+
+window.categoryStats = categoryStats;
+
+window.projectStats = projectStats;
+
+window.highlightLocation = highlightLocation;
+
+window.saveVisibleColumns = saveVisibleColumns;
+
+
+function normalizePartAliases(rows) {
+  return (rows || []).map((row) => ({
+    id: integerOrZero(row.id),
+    partId: integerOrZero(row.partId ?? row.part_id),
+    aliasType: nullableText(row.aliasType ?? row.alias_type),
+    aliasValue: textValue(row.aliasValue ?? row.alias_value),
+    notes: nullableText(row.notes)
+  })).filter((row) => row.id > 0 && row.partId > 0 && row.aliasValue);
+}
+
+function normalizeProjectReservations(rows) {
+  return (rows || []).map((row) => ({
+    id: integerOrZero(row.id),
+    projectId: integerOrZero(row.projectId ?? row.project_id),
+    partId: integerOrZero(row.partId ?? row.part_id),
+    quantity: integerOrZero(row.quantity),
+    locationId: row.locationId ?? row.location_id ?? null,
+    createdAt: row.createdAt || row.created_at || new Date().toISOString(),
+    notes: nullableText(row.notes)
+  })).filter((row) => row.id > 0 && row.projectId > 0 && row.partId > 0);
+}
+
+function normalizeActivityLog(rows) {
+  return (rows || []).map((row) => ({
+    id: integerOrZero(row.id),
+    createdAt: row.createdAt || row.created_at || new Date().toISOString(),
+    action: textValue(row.action),
+    entityType: nullableText(row.entityType ?? row.entity_type),
+    entityId: row.entityId ?? row.entity_id ?? null,
+    message: nullableText(row.message)
+  })).filter((row) => row.id > 0 && row.action);
+}
+
+function logActivity(action, entityType, entityId, message) {
+  state.inventory.activityLog = state.inventory.activityLog || [];
+  state.inventory.activityLog.unshift({
+    id: nextId(state.inventory.activityLog),
+    createdAt: new Date().toISOString(),
+    action,
+    entityType: entityType || null,
+    entityId: entityId || null,
+    message: message || null
+  });
+  state.inventory.activityLog = state.inventory.activityLog.slice(0, 300);
+}
+
+function activeProject() {
+  const projects = state.inventory.projects || [];
+  if (!state.activeProjectId && projects.length) state.activeProjectId = projects[0].id;
+  return projects.find((project) => project.id === Number(state.activeProjectId)) || projects[0] || null;
+}
+
+function projectBomRows(projectId) {
+  return (state.inventory.projectBom || []).filter((row) => row.projectId === Number(projectId));
+}
+
+function reservationsForProject(projectId) {
+  return (state.inventory.projectReservations || []).filter((row) => row.projectId === Number(projectId));
+}
+
+function reservedQuantity(partId, excludeProjectId = null) {
+  return (state.inventory.projectReservations || [])
+    .filter((row) => row.partId === Number(partId) && (excludeProjectId == null || row.projectId !== Number(excludeProjectId)))
+    .reduce((sum, row) => sum + numberOrZero(row.quantity), 0);
+}
+
+function projectReservedQuantity(projectId, partId) {
+  return (state.inventory.projectReservations || [])
+    .filter((row) => row.projectId === Number(projectId) && row.partId === Number(partId))
+    .reduce((sum, row) => sum + numberOrZero(row.quantity), 0);
+}
+
+function availableForPart(partId, excludeProjectId = null) {
+  return stockSummary(partId).total - reservedQuantity(partId, excludeProjectId);
+}
+
+function bomRowStatus(row) {
+  const partId = Number(row.partId || 0);
+  const need = numberOrZero(row.quantity);
+  if (!partId) return { matched: false, available: 0, reserved: 0, shortage: need, ok: false };
+  const available = availableForPart(partId, row.projectId);
+  const reserved = projectReservedQuantity(row.projectId, partId);
+  const effective = available + reserved;
+  const shortage = Math.max(0, need - effective);
+  return { matched: true, available, reserved, shortage, ok: shortage === 0 };
+}
+
+function projectSummary(projectId) {
+  const rows = projectBomRows(projectId);
+  const needed = rows.reduce((sum, row) => sum + numberOrZero(row.quantity), 0);
+  const unresolved = rows.filter((row) => !row.partId).length;
+  const shortageRows = rows.filter((row) => bomRowStatus(row).shortage > 0).length;
+  const reserved = reservationsForProject(projectId).reduce((sum, row) => sum + numberOrZero(row.quantity), 0);
+  return { rows: rows.length, needed, unresolved, shortageRows, reserved };
+}
+
+function findBestPartForBomRow(row) {
+  const mpn = String(row.mpn || "").trim().toLowerCase();
+  if (mpn) {
+    const byMpn = state.inventory.parts.find((part) => String(part.mpn || "").trim().toLowerCase() === mpn);
+    if (byMpn) return byMpn;
+    const alias = (state.inventory.partAliases || []).find((item) => String(item.aliasValue || "").trim().toLowerCase() === mpn);
+    if (alias) return state.inventory.parts.find((part) => part.id === alias.partId) || null;
+  }
+  const value = String(row.value || "").trim().toLowerCase();
+  const footprint = String(row.footprint || "").trim().toLowerCase();
+  return state.inventory.parts.find((part) => {
+    const name = String(part.name || "").toLowerCase();
+    const pkg = String(part.package || "").toLowerCase();
+    const fp = String(part.footprint || "").toLowerCase();
+    return (!value || name.includes(value)) && (!footprint || fp.includes(footprint) || pkg.includes(footprint));
+  }) || null;
+}
+
+function autoMatchProject(projectId) {
+  let matched = 0;
+  projectBomRows(projectId).forEach((row) => {
+    if (row.partId) return;
+    const part = findBestPartForBomRow(row);
+    if (part) {
+      row.partId = part.id;
+      row.notes = null;
+      matched += 1;
+    }
+  });
+  return matched;
+}
+
+function selectProject(projectId) {
+  state.activeProjectId = Number(projectId) || 0;
+  localStorage.setItem(STORAGE.activeProjectId || "tmi.activeProjectId", String(state.activeProjectId));
+  if (state.activeView === "projects") $("#viewPanel").innerHTML = renderProjectsView();
+}
+
+function deleteProject(projectId) {
+  const project = state.inventory.projects.find((item) => item.id === Number(projectId));
+  if (!project) return;
+  if (!confirm(`Delete project "${project.name}" and its BOM?`)) return;
+  state.inventory.projects = state.inventory.projects.filter((item) => item.id !== project.id);
+  state.inventory.projectBom = state.inventory.projectBom.filter((row) => row.projectId !== project.id);
+  state.inventory.projectReservations = state.inventory.projectReservations.filter((row) => row.projectId !== project.id);
+  logActivity("delete-project", "project", project.id, project.name);
+  touchInventory();
+  if (!persistDatabase("project deleted", { dirty: true })) return;
+  state.activeProjectId = state.inventory.projects[0]?.id || 0;
+  render();
+}
+
+function matchBomRow(rowId) {
+  const row = state.inventory.projectBom.find((item) => item.id === Number(rowId));
+  if (!row) return;
+  const part = findBestPartForBomRow(row);
+  if (!part) {
+    toast("no matching part found", "error");
+    return;
+  }
+  row.partId = part.id;
+  row.notes = null;
+  logActivity("match-bom-row", "project_bom", row.id, `${row.value || ""} -> ${part.name}`);
+  touchInventory();
+  if (!persistDatabase("BOM row matched", { dirty: true })) return;
+  render();
+}
+
+function unlinkBomRow(rowId) {
+  const row = state.inventory.projectBom.find((item) => item.id === Number(rowId));
+  if (!row) return;
+  row.partId = null;
+  row.notes = "unresolved";
+  touchInventory();
+  if (!persistDatabase("BOM row unlinked", { dirty: true })) return;
+  render();
+}
+
+function deleteBomRow(rowId) {
+  const row = state.inventory.projectBom.find((item) => item.id === Number(rowId));
+  if (!row) return;
+  state.inventory.projectBom = state.inventory.projectBom.filter((item) => item.id !== row.id);
+  touchInventory();
+  if (!persistDatabase("BOM row deleted", { dirty: true })) return;
+  render();
+}
+
+function reserveProjectParts(projectId) {
+  const project = state.inventory.projects.find((item) => item.id === Number(projectId));
+  if (!project) return;
+  releaseProjectReservations(projectId, { silent: true });
+  const reservations = [];
+  for (const row of projectBomRows(projectId)) {
+    if (!row.partId || row.fitted === 0) continue;
+    const need = numberOrZero(row.quantity);
+    if (need <= 0) continue;
+    const available = availableForPart(row.partId, projectId);
+    const qty = Math.min(need, Math.max(0, available));
+    if (qty > 0) {
+      reservations.push({
+        id: nextId(state.inventory.projectReservations.concat(reservations)),
+        projectId: Number(projectId),
+        partId: Number(row.partId),
+        quantity: qty,
+        locationId: null,
+        createdAt: new Date().toISOString(),
+        notes: "auto reservation"
+      });
+    }
+  }
+  state.inventory.projectReservations.push(...reservations);
+  logActivity("reserve-project", "project", project.id, `${reservations.length} reservation rows`);
+  touchInventory();
+  if (!persistDatabase("project parts reserved", { dirty: true })) return;
+  render();
+}
+
+function releaseProjectReservations(projectId, options = {}) {
+  state.inventory.projectReservations = (state.inventory.projectReservations || []).filter((row) => row.projectId !== Number(projectId));
+  if (!options.silent) {
+    logActivity("release-project", "project", projectId, "reservations released");
+    touchInventory();
+    if (!persistDatabase("project reservations released", { dirty: true })) return;
+    render();
+  }
+}
+
+function applyProjectConsumption(projectId) {
+  const rows = reservationsForProject(projectId);
+  if (!rows.length) {
+    toast("no reservations to consume", "error");
+    return;
+  }
+  if (!confirm("Subtract reserved quantities from stock?")) return;
+  for (const reservation of rows) {
+    let remaining = numberOrZero(reservation.quantity);
+    const stockRows = state.inventory.stock.filter((row) => row.partId === reservation.partId && row.quantity > 0);
+    for (const stock of stockRows) {
+      if (remaining <= 0) break;
+      const take = Math.min(remaining, numberOrZero(stock.quantity));
+      stock.quantity = numberOrZero(stock.quantity) - take;
+      remaining -= take;
+    }
+  }
+  state.inventory.projectReservations = state.inventory.projectReservations.filter((row) => row.projectId !== Number(projectId));
+  logActivity("consume-project", "project", projectId, "stock consumed from reservations");
+  touchInventory();
+  if (!persistDatabase("project stock consumed", { dirty: true })) return;
+  render();
+}
+
+
+window.activeProject = activeProject;
+window.projectBomRows = projectBomRows;
+window.reservationsForProject = reservationsForProject;
+window.availableForPart = availableForPart;
+window.bomRowStatus = bomRowStatus;
+window.projectSummary = projectSummary;
+window.findBestPartForBomRow = findBestPartForBomRow;
+window.autoMatchProject = autoMatchProject;
+window.selectProject = selectProject;
+window.deleteProject = deleteProject;
+window.matchBomRow = matchBomRow;
+window.unlinkBomRow = unlinkBomRow;
+window.deleteBomRow = deleteBomRow;
+window.reserveProjectParts = reserveProjectParts;
+window.releaseProjectReservations = releaseProjectReservations;
+window.applyProjectConsumption = applyProjectConsumption;
+window.logActivity = logActivity;

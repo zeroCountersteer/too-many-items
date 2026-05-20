@@ -237,7 +237,52 @@ function databaseToInventory(db) {
       valueNum: "value_num",
       unit: "unit",
       valueText: "value_text"
-    }, "ORDER BY \"part_id\", \"name\"")
+    }, "ORDER BY \"part_id\", \"name\""),
+    projects: selectTable(db, "projects", {
+      id: "id",
+      name: "name",
+      revision: "revision",
+      sourceFile: "source_file",
+      createdAt: "created_at",
+      updatedAt: "updated_at",
+      notes: "notes"
+    }, "ORDER BY \"id\""),
+    projectBom: selectTable(db, "project_bom", {
+      id: "id",
+      projectId: "project_id",
+      partId: "part_id",
+      value: "value",
+      footprint: "footprint",
+      mpn: "mpn",
+      referencesText: "references_text",
+      quantity: "quantity",
+      fitted: "fitted",
+      notes: "notes"
+    }, "ORDER BY \"project_id\", \"id\""),
+    partAliases: selectTable(db, "part_aliases", {
+      id: "id",
+      partId: "part_id",
+      aliasType: "alias_type",
+      aliasValue: "alias_value",
+      notes: "notes"
+    }, "ORDER BY \"part_id\", \"id\""),
+    projectReservations: selectTable(db, "project_reservations", {
+      id: "id",
+      projectId: "project_id",
+      partId: "part_id",
+      quantity: "quantity",
+      locationId: "location_id",
+      createdAt: "created_at",
+      notes: "notes"
+    }, "ORDER BY \"project_id\", \"id\""),
+    activityLog: selectTable(db, "activity_log", {
+      id: "id",
+      createdAt: "created_at",
+      action: "action",
+      entityType: "entity_type",
+      entityId: "entity_id",
+      message: "message"
+    }, "ORDER BY \"id\" DESC")
   };
 
   const keyswitchTable = tableExists(db, "keyswitch_specs") ? "keyswitch_specs" : (tableExists(db, "keyswitch_spec") ? "keyswitch_spec" : null);
@@ -283,7 +328,21 @@ function inventoryToDatabaseBytes(inventory) {
     });
 
     inv.locations.forEach((row) => {
-      db.run("INSERT INTO \"locations\" (\"id\", \"name\", \"parent_id\", \"notes\") VALUES (?, ?, ?, ?)", [row.id, row.name, sqlValue(row.parentId), sqlValue(row.notes)]);
+      db.run(`INSERT INTO "locations" ("id", "name", "type", "parent_id", "capacity", "x", "y", "z", "color", "led_node", "led_index", "network_target", "notes") VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`, [
+        row.id,
+        row.name,
+        sqlValue(row.type || "bin"),
+        sqlValue(row.parentId),
+        sqlValue(row.capacity),
+        sqlValue(row.x),
+        sqlValue(row.y),
+        sqlValue(row.z),
+        sqlValue(row.color),
+        sqlValue(row.ledNode),
+        sqlValue(row.ledIndex),
+        sqlValue(row.networkTarget),
+        sqlValue(row.notes)
+      ]);
     });
 
     inv.parts.forEach((row) => {
@@ -332,6 +391,66 @@ function inventoryToDatabaseBytes(inventory) {
         sqlValue(row.valueNum),
         sqlValue(row.unit),
         sqlValue(row.valueText)
+      ]);
+    });
+
+    (inv.projects || []).forEach((row) => {
+      db.run(`INSERT INTO "projects" ("id", "name", "revision", "source_file", "created_at", "updated_at", "notes") VALUES (?, ?, ?, ?, ?, ?, ?)`, [
+        row.id,
+        row.name,
+        sqlValue(row.revision),
+        sqlValue(row.sourceFile),
+        row.createdAt || new Date().toISOString(),
+        sqlValue(row.updatedAt),
+        sqlValue(row.notes)
+      ]);
+    });
+
+    (inv.projectBom || []).forEach((row) => {
+      db.run(`INSERT INTO "project_bom" ("id", "project_id", "part_id", "value", "footprint", "mpn", "references_text", "quantity", "fitted", "notes") VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`, [
+        row.id,
+        row.projectId,
+        sqlValue(row.partId),
+        sqlValue(row.value),
+        sqlValue(row.footprint),
+        sqlValue(row.mpn),
+        sqlValue(row.referencesText),
+        integerOrZero(row.quantity),
+        row.fitted === 0 ? 0 : 1,
+        sqlValue(row.notes)
+      ]);
+    });
+
+    (inv.partAliases || []).forEach((row) => {
+      db.run(`INSERT OR IGNORE INTO "part_aliases" ("id", "part_id", "alias_type", "alias_value", "notes") VALUES (?, ?, ?, ?, ?)`, [
+        row.id,
+        row.partId,
+        sqlValue(row.aliasType),
+        row.aliasValue,
+        sqlValue(row.notes)
+      ]);
+    });
+
+    (inv.projectReservations || []).forEach((row) => {
+      db.run(`INSERT INTO "project_reservations" ("id", "project_id", "part_id", "quantity", "location_id", "created_at", "notes") VALUES (?, ?, ?, ?, ?, ?, ?)`, [
+        row.id,
+        row.projectId,
+        row.partId,
+        integerOrZero(row.quantity),
+        sqlValue(row.locationId),
+        row.createdAt || new Date().toISOString(),
+        sqlValue(row.notes)
+      ]);
+    });
+
+    (inv.activityLog || []).forEach((row) => {
+      db.run(`INSERT INTO "activity_log" ("id", "created_at", "action", "entity_type", "entity_id", "message") VALUES (?, ?, ?, ?, ?, ?)`, [
+        row.id,
+        row.createdAt || new Date().toISOString(),
+        row.action,
+        sqlValue(row.entityType),
+        sqlValue(row.entityId),
+        sqlValue(row.message)
       ]);
     });
 

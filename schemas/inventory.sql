@@ -10,9 +10,19 @@ CREATE TABLE IF NOT EXISTS "categories" (
 
 CREATE TABLE IF NOT EXISTS "locations" (
   "id" INTEGER PRIMARY KEY,
-  "name" TEXT NOT NULL UNIQUE,
+  "name" TEXT NOT NULL,
+  "type" TEXT DEFAULT 'bin',
   "parent_id" INTEGER,
+  "capacity" INTEGER,
+  "x" INTEGER,
+  "y" INTEGER,
+  "z" INTEGER,
+  "color" TEXT,
+  "led_node" TEXT,
+  "led_index" INTEGER,
+  "network_target" TEXT,
   "notes" TEXT,
+  UNIQUE("parent_id", "name"),
   FOREIGN KEY("parent_id") REFERENCES "locations"("id")
 );
 
@@ -136,3 +146,73 @@ LEFT JOIN (
   LEFT JOIN "locations" l ON l."id" = s."location_id"
   GROUP BY s."part_id"
 ) st ON st."part_id" = p."id";
+
+
+CREATE TABLE IF NOT EXISTS "projects" (
+  "id" INTEGER PRIMARY KEY,
+  "name" TEXT NOT NULL,
+  "revision" TEXT,
+  "source_file" TEXT,
+  "created_at" TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  "updated_at" TEXT,
+  "notes" TEXT
+);
+
+CREATE TABLE IF NOT EXISTS "project_bom" (
+  "id" INTEGER PRIMARY KEY,
+  "project_id" INTEGER NOT NULL,
+  "part_id" INTEGER,
+  "value" TEXT,
+  "footprint" TEXT,
+  "mpn" TEXT,
+  "references_text" TEXT,
+  "quantity" INTEGER NOT NULL DEFAULT 0,
+  "fitted" INTEGER DEFAULT 1 CHECK("fitted" IN (0, 1)),
+  "notes" TEXT,
+  FOREIGN KEY("project_id") REFERENCES "projects"("id") ON DELETE CASCADE,
+  FOREIGN KEY("part_id") REFERENCES "parts"("id") ON DELETE SET NULL
+);
+
+CREATE INDEX IF NOT EXISTS "idx_locations_parent" ON "locations" ("parent_id");
+CREATE INDEX IF NOT EXISTS "idx_locations_type" ON "locations" ("type");
+CREATE INDEX IF NOT EXISTS "idx_project_bom_project" ON "project_bom" ("project_id");
+CREATE INDEX IF NOT EXISTS "idx_project_bom_part" ON "project_bom" ("part_id");
+
+
+CREATE TABLE IF NOT EXISTS "part_aliases" (
+  "id" INTEGER PRIMARY KEY,
+  "part_id" INTEGER NOT NULL,
+  "alias_type" TEXT,
+  "alias_value" TEXT NOT NULL,
+  "notes" TEXT,
+  UNIQUE("alias_type", "alias_value"),
+  FOREIGN KEY("part_id") REFERENCES "parts"("id") ON DELETE CASCADE
+);
+
+CREATE TABLE IF NOT EXISTS "project_reservations" (
+  "id" INTEGER PRIMARY KEY,
+  "project_id" INTEGER NOT NULL,
+  "part_id" INTEGER NOT NULL,
+  "quantity" INTEGER NOT NULL DEFAULT 0,
+  "location_id" INTEGER,
+  "created_at" TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  "notes" TEXT,
+  FOREIGN KEY("project_id") REFERENCES "projects"("id") ON DELETE CASCADE,
+  FOREIGN KEY("part_id") REFERENCES "parts"("id") ON DELETE CASCADE,
+  FOREIGN KEY("location_id") REFERENCES "locations"("id") ON DELETE SET NULL
+);
+
+CREATE TABLE IF NOT EXISTS "activity_log" (
+  "id" INTEGER PRIMARY KEY,
+  "created_at" TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  "action" TEXT NOT NULL,
+  "entity_type" TEXT,
+  "entity_id" INTEGER,
+  "message" TEXT
+);
+
+CREATE INDEX IF NOT EXISTS "idx_part_aliases_part" ON "part_aliases" ("part_id");
+CREATE INDEX IF NOT EXISTS "idx_part_aliases_value" ON "part_aliases" ("alias_value");
+CREATE INDEX IF NOT EXISTS "idx_project_reservations_project" ON "project_reservations" ("project_id");
+CREATE INDEX IF NOT EXISTS "idx_project_reservations_part" ON "project_reservations" ("part_id");
+CREATE INDEX IF NOT EXISTS "idx_activity_log_created" ON "activity_log" ("created_at");

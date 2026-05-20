@@ -16,6 +16,7 @@ function render() {
   if (state.activeView === "parts") panel.innerHTML = renderPartsView();
   if (state.activeView === "add") panel.innerHTML = renderAddImportView();
   if (state.activeView === "locations") panel.innerHTML = renderLocationsView();
+  if (state.activeView === "projects") panel.innerHTML = renderProjectsView();
   if (state.activeView === "database") panel.innerHTML = renderDatabaseView();
   if (state.activeView === "settings") panel.innerHTML = renderSettingsView();
 }
@@ -48,11 +49,12 @@ function renderNavigation() {
 
 function renderHeader() {
   const titles = {
-    parts: ["INVENTORY / PARTS", "parts"],
-    add: ["INVENTORY / ADD", "bulk add"],
-    locations: ["INVENTORY / LOCATIONS", "locations"],
-    database: ["INVENTORY / DATABASE", "database"],
-    settings: ["INVENTORY / SETTINGS", "settings"]
+    parts: ["inventory", "parts"],
+    add: ["inventory", "bulk add"],
+    locations: ["inventory", "locations"],
+    projects: ["inventory", "projects"],
+    database: ["inventory", "statistics"],
+    settings: ["inventory", "settings"]
   };
   const [path, title] = titles[state.activeView] || titles.parts;
   $("#pathLine").textContent = path;
@@ -61,16 +63,9 @@ function renderHeader() {
 
   const notice = $("#noticeLine");
   if (!notice) return;
-  let text = "";
-  if (state.sqliteError) {
-    text = `SQLite engine is not available: ${state.sqliteError}`;
-  } else if (state.inventory.parts.length === 0) {
-    text = "Database is empty. Add the first part or open inventory.db.";
-  } else if (state.dbDirty) {
-    text = "Local changes are not committed to GitHub yet.";
-  }
+  let text = state.sqliteError ? `SQLite engine is not available: ${state.sqliteError}` : "";
   notice.textContent = text;
-  notice.hidden = !text;
+  notice.hidden = true;
 }
 
 function renderMetrics() {
@@ -450,3 +445,415 @@ function renderSettingsView() {
 }
 
 
+
+/* v16 overrides */
+
+function renderNavigation() {
+  $$('[data-view]').forEach((button) => {
+    button.classList.toggle("active", button.dataset.view === state.activeView);
+  });
+  const owner = state.githubConfig?.owner || "inventory";
+  const repo = state.githubConfig?.repo || "local";
+  const ownerHeader = $("#ownerHeader");
+  if (ownerHeader) ownerHeader.textContent = owner;
+  const navName = $("#navDbName");
+  const navState = $("#navDbState");
+  const navDetails = $("#navDbDetails");
+  const metrics = getMetrics();
+  if (navName) navName.textContent = repo === "local" ? (state.dbFileName || "inventory.db") : repo;
+  if (navState) navState.textContent = databaseStateLabel();
+  if (navDetails) {
+    const pstats = projectStats();
+    navDetails.innerHTML = [
+      ["branch", state.githubConfig?.branch || "main"],
+      ["path", state.githubConfig?.path || BUNDLED_DB_PATH],
+      ["state", databaseStateLabel()],
+      ["parts", metrics.parts],
+      ["stock", metrics.quantity],
+      ["locations", metrics.locations],
+      ["projects", pstats.projects],
+      ["updated", formatDate(state.inventory.meta?.updatedAt) || "--"]
+    ].map(([key, value]) => `<div><span>${escapeHtml(String(key))}</span><strong>${escapeHtml(String(value))}</strong></div>`).join("");
+  }
+}
+
+function renderMetrics() {
+  const metrics = getMetrics();
+  $("#metricsGrid").innerHTML = [
+    metricHtml(metrics.parts, "parts"),
+    metricHtml(metrics.quantity, "items"),
+    metricHtml(metrics.locations, "locations"),
+    metricHtml(metrics.lowStock, "low")
+  ].join("");
+}
+
+function renderPartsView() {
+  const categories = state.inventory.categories;
+  const filtered = filteredParts();
+  const categoryOptions = [`<option value="all">all categories</option>`]
+    .concat(categories.map((category) => `<option value="${category.id}" ${String(category.id) === String(state.categoryFilter) ? "selected" : ""}>${escapeHtml(category.name)}</option>`))
+    .join("");
+  const sortOptions = [
+    ["category", "sort: category"],
+    ["name", "sort: name"],
+    ["value", "sort: value/spec"],
+    ["voltage", "sort: voltage"],
+    ["tolerance", "sort: tolerance"],
+    ["quantity", "sort: quantity"],
+    ["package", "sort: package"],
+    ["location", "sort: location"],
+    ["id", "sort: id"]
+  ].map(([value, label]) => `<option value="${value}" ${state.sortKey === value ? "selected" : ""}>${label}</option>`).join("");
+
+  const columnChooser = Object.entries(PART_COLUMN_DEFS).map(([key, label]) => {
+    const checked = (state.visibleColumns || DEFAULT_PART_COLUMNS).includes(key);
+    const disabled = key === "actions";
+    return `<label class="check-chip"><input type="checkbox" data-column-toggle value="${escapeAttr(key)}" ${checked ? "checked" : ""} ${disabled ? "disabled" : ""} />${escapeHtml(label || "edit")}</label>`;
+  }).join("");
+
+  const table = filtered.length
+    ? renderPartsTable(filtered)
+    : `<div class="empty-state compact"><div><h3>no matching parts</h3><p>Clear filters or add a component.</p><div class="inline-actions"><button type="button" class="primary-button" data-action="open-add-part">+ add part</button></div></div></div>`;
+
+  const categoryKindName = state.categoryFilter !== "all" ? categoryKind(getCategoryName(Number(state.categoryFilter))) : "";
+  const minPlaceholder = categoryKindName === "resistor" ? "min 1k" : categoryKindName === "capacitor" ? "min 100N" : categoryKindName === "inductor" ? "min 1U" : "spec min";
+  const maxPlaceholder = categoryKindName === "resistor" ? "max 10k" : categoryKindName === "capacitor" ? "max 10U" : categoryKindName === "inductor" ? "max 100U" : "spec max";
+
+  return `
+    <div class="view-head compact-head">
+      <h3 class="view-title"><span>parts</span> / ${filtered.length} shown</h3>
+    </div>
+    <div class="toolbar-grid parts-toolbar sticky-tools">
+      <input type="search" data-search value="${escapeAttr(state.query)}" placeholder="search name, mpn, value, location..." />
+      <select data-category-filter>${categoryOptions}</select>
+      <input type="search" data-package-filter value="${escapeAttr(state.packageFilter || "")}" placeholder="package/footprint" />
+      <input type="search" data-spec-min value="${escapeAttr(state.specFilterMin || "")}" placeholder="${escapeAttr(minPlaceholder)}" />
+      <input type="search" data-spec-max value="${escapeAttr(state.specFilterMax || "")}" placeholder="${escapeAttr(maxPlaceholder)}" />
+      <input type="search" data-spec-extra value="${escapeAttr(state.specFilterExtra || "")}" placeholder="spec text, dielectric, interface..." />
+      <select data-stock-filter>
+        <option value="all" ${state.stockFilter === "all" ? "selected" : ""}>stock: all</option>
+        <option value="in-stock" ${state.stockFilter === "in-stock" ? "selected" : ""}>stock: in stock</option>
+        <option value="low" ${state.stockFilter === "low" ? "selected" : ""}>stock: low</option>
+        <option value="zero" ${state.stockFilter === "zero" ? "selected" : ""}>stock: zero</option>
+        <option value="no-location" ${state.stockFilter === "no-location" ? "selected" : ""}>stock: no location</option>
+      </select>
+      <select data-sort-key>${sortOptions}</select>
+      <select data-sort-dir>
+        <option value="asc" ${state.sortDir !== "desc" ? "selected" : ""}>asc</option>
+        <option value="desc" ${state.sortDir === "desc" ? "selected" : ""}>desc</option>
+      </select>
+      <button type="button" data-action="set-view" data-target-view="add">bulk add</button>
+      <button type="button" class="primary-button" data-action="open-add-part">+ part</button>
+      <button type="button" data-action="export-db">export</button>
+    </div>
+    <details class="column-panel">
+      <summary>columns</summary>
+      <div class="column-grid">${columnChooser}</div>
+    </details>
+    ${table}
+  `;
+}
+
+function renderPartsTable(parts) {
+  const columns = (state.visibleColumns || DEFAULT_PART_COLUMNS).filter((col) => PART_COLUMN_DEFS[col] !== undefined);
+  const renderCell = (part, col) => {
+    const category = getCategoryName(part.categoryId);
+    const stock = stockSummary(part.id);
+    const spec = specSummary(part);
+    const low = stock.total <= stock.min && stock.min > 0;
+    const mpn = [part.manufacturer, part.mpn].filter(Boolean).join(" / ") || "generic";
+    if (col === "id") return `<td class="mono-cell">${part.id}</td>`;
+    if (col === "name") return `<td><span class="part-name">${escapeHtml(part.name)}</span><span class="subtext">${escapeHtml(mpn)}</span></td>`;
+    if (col === "category") return `<td><span class="badge">${escapeHtml(category)}</span></td>`;
+    if (col === "value") return `<td><span class="mono-cell">${escapeHtml(spec || "-")}</span></td>`;
+    if (col === "package") return `<td><span class="mono-cell">${escapeHtml(part.package || "")}</span></td>`;
+    if (col === "footprint") return `<td><span class="subtext">${escapeHtml(part.footprint || "")}</span></td>`;
+    if (col === "quantity") return `<td><span class="${low ? "qty-low" : "qty-ok"}">${stock.total}</span></td>`;
+    if (col === "min") return `<td>${stock.min || ""}</td>`;
+    if (col === "location") return `<td>${escapeHtml(stock.locations || "-")}</td>`;
+    if (col === "manufacturer") return `<td>${escapeHtml(part.manufacturer || "")}</td>`;
+    if (col === "mpn") return `<td>${escapeHtml(part.mpn || "")}</td>`;
+    if (col === "notes") return `<td>${escapeHtml(part.notes || "")}</td>`;
+    if (col === "actions") return `<td><button type="button" class="ghost-button small-button" data-action="open-edit-part" data-id="${part.id}">edit</button></td>`;
+    return "";
+  };
+  const headers = columns.map((col) => `<th>${escapeHtml(PART_COLUMN_DEFS[col] || col)}</th>`).join("");
+  const rows = parts.map((part) => `<tr>${columns.map((col) => renderCell(part, col)).join("")}</tr>`).join("");
+  return `<div class="table-wrap scroll-card"><table class="compact-parts-table"><thead><tr>${headers}</tr></thead><tbody>${rows}</tbody></table></div>`;
+}
+
+function renderDatabaseView() {
+  const validation = validateInventory(state.inventory);
+  const metrics = getMetrics();
+  const catRows = categoryStats().slice(0, 12).map((row) => renderBar(row.category.name, row.count, row.percent)).join("");
+  const storage = storageStats();
+  const storageRows = storage.byLocation.slice(0, 12).map((row) => renderBar(locationPath(row.location.id), row.quantity, row.fill == null ? Math.min(100, row.quantity ? 12 : 0) : row.fill)).join("");
+  const pstats = projectStats();
+
+  return `
+    <div class="view-head compact-head">
+      <h3 class="view-title"><span>database</span> / statistics</h3>
+      <div class="tool-row compact-tools">
+        <button type="button" data-action="import-db">open .db</button>
+        <button type="button" class="primary-button" data-action="export-db">export .db</button>
+      </div>
+    </div>
+
+    <div class="database-grid stats-grid">
+      <section class="database-card stat-big"><h4>inventory</h4><div class="stat-number">${metrics.parts}</div><p>parts / ${metrics.quantity} items / ${metrics.stockRecords} stock rows</p></section>
+      <section class="database-card stat-big"><h4>storage</h4><div class="stat-number">${metrics.locations}</div><p>${storage.orphanRows} stock rows without location</p></section>
+      <section class="database-card stat-big"><h4>projects</h4><div class="stat-number">${pstats.projects}</div><p>${pstats.bomRows} BOM rows / ${pstats.unresolved} unresolved / ${(state.inventory.projectReservations || []).length} reservations</p></section>
+      <section class="${validation.ok ? "database-card ok-card" : "database-card warn-card"}"><h4>health</h4><p>${validation.ok ? "Inventory references are valid." : escapeHtml(validation.errors[0])}</p></section>
+    </div>
+
+    <div class="database-grid two-col">
+      <section class="database-card"><h4>category distribution</h4><div class="bar-list">${catRows || "<p>No category data.</p>"}</div></section>
+      <section class="database-card"><h4>storage occupancy</h4><div class="bar-list">${storageRows || "<p>No locations yet.</p>"}</div></section>
+    </div>
+
+    <div class="database-card">
+      <h4>file actions</h4>
+      <div class="database-actions">
+        <button type="button" data-action="load-bundled-db">reload bundled db</button>
+        <button type="button" data-action="save-local-db">save local copy</button>
+        <button type="button" class="primary-button" data-action="export-db">download inventory.db</button>
+        <button type="button" class="danger-button" data-action="new-database">new empty database</button>
+      </div>
+      <dl class="kv-list">
+        <div><dt>source</dt><dd>${escapeHtml(state.dbSource || "local")}</dd></div>
+        <div><dt>remote path</dt><dd>${escapeHtml(state.githubConfig.path || BUNDLED_DB_PATH)}</dd></div>
+        <div><dt>state</dt><dd>${escapeHtml(databaseStateLabel())}</dd></div>
+      </dl>
+    </div>
+  `;
+}
+
+function renderBar(label, value, percent) {
+  const width = Math.max(2, Math.min(100, Number(percent) || 0));
+  return `<div class="stat-bar-row"><div class="stat-bar-label"><span>${escapeHtml(label)}</span><strong>${escapeHtml(String(value))}</strong></div><div class="stat-bar"><span style="width:${width}%"></span></div></div>`;
+}
+
+function renderLocationsView() {
+  const roots = state.inventory.locations.filter((loc) => !loc.parentId);
+  const cards = roots.length
+    ? `<div class="location-tree">${roots.map((location) => renderLocationNode(location)).join("")}</div>`
+    : `<div class="empty-state"><div><h3>no storage map yet</h3><p>Add homes, work sites, cabinets, drawers, bins, boxes, or LED nodes.</p><button type="button" class="primary-button" data-action="open-add-location">+ add location</button></div></div>`;
+
+  return `
+    <div class="view-head compact-head">
+      <h3 class="view-title"><span>storage</span> / locations</h3>
+      <div class="tool-row compact-tools">
+        <button type="button" class="primary-button" data-action="open-add-location">+ location</button>
+        <button type="button" data-action="export-db">export</button>
+      </div>
+    </div>
+    <div class="database-card">
+      <p>Locations are hierarchical and can include capacity, coordinates, color, LED node metadata, and network highlight targets.</p>
+    </div>
+    ${cards}
+  `;
+}
+
+function renderLocationNode(location, depth = 0) {
+  const children = state.inventory.locations.filter((item) => item.parentId === location.id);
+  const stockRows = state.inventory.stock.filter((row) => row.locationId === location.id);
+  const qty = stockRows.reduce((sum, row) => sum + numberOrZero(row.quantity), 0);
+  const capacity = numberOrZero(location.capacity);
+  const fill = capacity ? Math.min(100, Math.round(qty / capacity * 100)) : null;
+  const color = location.color ? `style="--loc-color:${escapeAttr(location.color)}"` : "";
+  return `<article class="location-node depth-${Math.min(depth, 5)}" ${color}>
+    <div class="location-main">
+      <div>
+        <h4><span class="loc-dot"></span>${escapeHtml(location.name)}</h4>
+        <p>${escapeHtml(location.type || "bin")} / id ${location.id} / qty ${qty}${capacity ? ` / capacity ${capacity}` : ""}</p>
+        ${location.ledNode || location.networkTarget ? `<p class="subtext">LED: ${escapeHtml(location.ledNode || "-")} #${escapeHtml(String(location.ledIndex ?? "-"))} / target: ${escapeHtml(location.networkTarget || "-")}</p>` : ""}
+        ${fill != null ? `<div class="stat-bar small"><span style="width:${fill}%"></span></div>` : ""}
+      </div>
+      <div class="inline-actions">
+        <button type="button" class="ghost-button" data-action="highlight-location" data-id="${location.id}">highlight</button>
+        <button type="button" class="ghost-button" data-action="open-edit-location" data-id="${location.id}">edit</button>
+        <button type="button" class="danger-button" data-action="delete-location" data-id="${location.id}">delete</button>
+      </div>
+    </div>
+    ${children.length ? `<div class="location-children">${children.map((child) => renderLocationNode(child, depth + 1)).join("")}</div>` : ""}
+  </article>`;
+}
+
+function renderAddImportView() {
+  const locations = [`<option value="">no default location</option>`].concat(
+    state.inventory.locations.map((location) => `<option value="${location.id}">${escapeHtml(locationPath(location.id))}</option>`)
+  ).join("");
+
+  return `
+    <div class="view-head compact-head">
+      <h3 class="view-title"><span>add</span> / bulk entry and BOM</h3>
+      <div class="tool-row compact-tools"><button type="button" class="primary-button" data-action="open-add-part">+ manual part</button></div>
+    </div>
+    <div class="add-import-grid single-column">
+      <section class="database-card add-card">
+        <h4>spreadsheet bulk add</h4>
+        <p class="small-note">Use rows with shared defaults. Clone a row when only value or quantity changes.</p>
+        <form id="bulkImportForm" novalidate onsubmit="return false;">
+          <div class="form-grid">
+            <div class="field"><label>kind</label><select name="kind"><option value="resistor">resistors</option><option value="capacitor">capacitors</option><option value="inductor">inductors</option><option value="generic">generic parts</option></select></div>
+            <div class="field"><label>package</label><input name="defaultPackage" placeholder="0603" /></div>
+            <div class="field"><label>footprint</label><input name="defaultFootprint" placeholder="R_0603_1608Metric" /></div>
+            <div class="field"><label>default qty</label><input name="defaultQuantity" type="number" min="0" step="1" value="0" /></div>
+            <div class="field"><label>min stock</label><input name="defaultMin" type="number" min="0" step="1" value="0" /></div>
+            <div class="field"><label>location</label><select name="defaultLocationId">${locations}</select></div>
+            <div class="field"><label>source</label><input name="defaultSource" placeholder="LCSC, AliExpress, Mouser" /></div>
+            <div class="field"><label>tolerance %</label><input name="defaultTolerance" placeholder="1" /></div>
+            <div class="field"><label>power W</label><input name="defaultPower" placeholder="0.1 or 1/10W" /></div>
+            <div class="field"><label>voltage V</label><input name="defaultVoltage" placeholder="50" /></div>
+            <div class="field"><label>dielectric</label><input name="defaultDielectric" placeholder="X7R, C0G, NP0" /></div>
+            <div class="field"><label>current A</label><input name="defaultCurrent" placeholder="1.5" /></div>
+            <label class="switch-row inline-switch"><span>merge matching existing parts</span><input name="mergeExisting" type="checkbox" checked /></label>
+          </div>
+
+          <div class="bulk-grid-editor" id="bulkGrid">
+            ${renderBulkLine(0)}
+          </div>
+          <div class="database-actions">
+            <button type="button" data-action="add-bulk-line">+ blank row</button>
+            <button type="button" data-action="clone-bulk-line" data-id="0">+ clone previous</button>
+            <button type="button" data-action="preview-bulk">preview</button>
+            <button type="button" class="primary-button" data-action="import-bulk">import rows</button>
+          </div>
+
+          <details class="database-card nested-card">
+            <summary>series generator</summary>
+            <div class="form-grid">
+              <div class="field"><label>series</label><select name="seriesName"><option>E24</option><option>E48</option><option>E96</option><option>E12</option><option>E6</option><option>E3</option></select></div>
+              <div class="field"><label>decades</label><input name="seriesDecades" value="100,1k,10k,100k" /></div>
+              <div class="field"><label>qty</label><input name="seriesQty" type="number" value="100" /></div>
+              <div class="field"><label>replace rows</label><select name="seriesReplace"><option value="append">append</option><option value="replace">replace</option></select></div>
+            </div>
+            <button type="button" data-action="generate-series">generate rows</button>
+          </details>
+
+          <textarea name="bulkText" class="bulk-textarea hidden-bulk-text" hidden></textarea>
+        </form>
+        <div id="bulkPreview" class="bulk-preview"></div>
+      </section>
+
+      <section class="database-card add-card">
+        <h4>KiCad BOM import</h4>
+        <p class="small-note">Paste KiCad default BOM CSV. It creates a stored project and editable BOM rows in the SQLite repo database.</p>
+        <form id="kicadBomForm" novalidate onsubmit="return false;">
+          <div class="form-grid">
+            <div class="field"><label>project name</label><input name="projectName" placeholder="My keyboard PCB" /></div>
+            <div class="field"><label>revision</label><input name="revision" placeholder="rev A" /></div>
+            <div class="field span-2"><label>BOM CSV</label><textarea name="bomCsv" class="bulk-textarea" placeholder='"Id","Designator","Package","Quantity","Designation","Supplier and ref"'></textarea></div>
+          </div>
+          <button type="button" class="primary-button" data-action="import-kicad-bom">store project BOM</button>
+        </form>
+      </section>
+    </div>
+  `;
+}
+
+function renderBulkLine(index, row = {}) {
+  return `<div class="bulk-line" data-bulk-row="${index}">
+    <input data-bulk-input name="bulkValue_${index}" placeholder="value" value="${escapeAttr(row.value || "")}" />
+    <input data-bulk-input name="bulkQty_${index}" type="number" min="0" step="1" placeholder="qty" value="${escapeAttr(row.quantity || "")}" />
+    <input data-bulk-input name="bulkMin_${index}" type="number" min="0" step="1" placeholder="min" value="${escapeAttr(row.min || "")}" />
+    <input data-bulk-input name="bulkLocation_${index}" placeholder="location override" value="${escapeAttr(row.location || "")}" />
+    <input data-bulk-input name="bulkSource_${index}" placeholder="source" value="${escapeAttr(row.source || "")}" />
+    <button type="button" data-action="clone-bulk-line" data-id="${index}">clone</button>
+    <button type="button" class="danger-button" data-action="remove-bulk-line" data-id="${index}">×</button>
+  </div>`;
+}
+
+
+function renderProjectsView() {
+  const projects = state.inventory.projects || [];
+  const project = activeProject();
+  const list = projects.length
+    ? projects.map((item) => {
+        const summary = projectSummary(item.id);
+        return `<button type="button" class="project-list-item ${project?.id === item.id ? "active" : ""}" data-action="select-project" data-id="${item.id}">
+          <strong>${escapeHtml(item.name)}</strong>
+          <span>${escapeHtml(item.revision || "no rev")} / ${summary.rows} rows / ${summary.shortageRows} shortages</span>
+        </button>`;
+      }).join("")
+    : `<div class="empty-state compact"><div><h3>no projects</h3><p>Import a KiCad BOM from the ADD page.</p><button type="button" data-action="set-view" data-target-view="add">import BOM</button></div></div>`;
+
+  if (!project) {
+    return `<div class="view-head compact-head"><h3 class="view-title"><span>projects</span> / BOM</h3></div><div class="projects-layout"><aside class="project-list">${list}</aside></div>`;
+  }
+
+  const summary = projectSummary(project.id);
+  const rows = projectBomRows(project.id)
+    .filter((row) => {
+      const q = String(state.projectQuery || "").toLowerCase();
+      if (!q) return true;
+      const part = row.partId ? state.inventory.parts.find((item) => item.id === row.partId) : null;
+      return [row.value, row.footprint, row.mpn, row.referencesText, part?.name].filter(Boolean).join(" ").toLowerCase().includes(q);
+    });
+
+  return `
+    <div class="view-head compact-head">
+      <h3 class="view-title"><span>projects</span> / BOM</h3>
+      <div class="tool-row compact-tools">
+        <button type="button" data-action="set-view" data-target-view="add">import BOM</button>
+        <button type="button" data-action="reserve-project" data-id="${project.id}">reserve</button>
+        <button type="button" data-action="release-project" data-id="${project.id}">release</button>
+        <button type="button" class="danger-button" data-action="apply-project-consumption" data-id="${project.id}">consume stock</button>
+      </div>
+    </div>
+    <div class="projects-layout">
+      <aside class="project-list">${list}</aside>
+      <section class="project-detail">
+        <div class="database-card">
+          <div class="project-head">
+            <div>
+              <h4>${escapeHtml(project.name)}</h4>
+              <p>${escapeHtml(project.revision || "no revision")} / ${summary.rows} rows / need ${summary.needed} / reserved ${summary.reserved}</p>
+            </div>
+            <div class="inline-actions">
+              <button type="button" data-action="delete-project" data-id="${project.id}" class="danger-button">delete project</button>
+            </div>
+          </div>
+          <div class="project-stat-grid">
+            ${metricHtml(summary.rows, "BOM rows")}
+            ${metricHtml(summary.unresolved, "unresolved")}
+            ${metricHtml(summary.shortageRows, "shortage rows")}
+            ${metricHtml(summary.reserved, "reserved")}
+          </div>
+          <input type="search" data-project-search value="${escapeAttr(state.projectQuery || "")}" placeholder="filter BOM rows..." />
+        </div>
+        ${renderBomTable(project, rows)}
+      </section>
+    </div>
+  `;
+}
+
+function renderBomTable(project, rows) {
+  const body = rows.length ? rows.map((row) => {
+    const part = row.partId ? state.inventory.parts.find((item) => item.id === row.partId) : null;
+    const status = bomRowStatus(row);
+    return `<tr class="${status.shortage ? "bom-shortage" : ""}">
+      <td>${escapeHtml(row.referencesText || "")}</td>
+      <td>${escapeHtml(row.value || "")}</td>
+      <td>${escapeHtml(row.footprint || "")}</td>
+      <td>${escapeHtml(row.mpn || "")}</td>
+      <td>${row.quantity}</td>
+      <td>${part ? `<button type="button" class="link-button" data-action="open-edit-part" data-id="${part.id}">${escapeHtml(part.name)}</button>` : `<span class="danger-text">unresolved</span>`}</td>
+      <td>${status.available}</td>
+      <td>${status.reserved}</td>
+      <td>${status.shortage ? `<span class="qty-low">${status.shortage}</span>` : `<span class="qty-ok">0</span>`}</td>
+      <td>${row.fitted === 0 ? "no" : "yes"}</td>
+      <td class="bom-actions">
+        <button type="button" data-action="match-bom-row" data-id="${row.id}">match</button>
+        <button type="button" data-action="open-edit-bom-row" data-id="${row.id}">edit</button>
+        <button type="button" data-action="unlink-bom-row" data-id="${row.id}">unlink</button>
+        <button type="button" class="danger-button" data-action="delete-bom-row" data-id="${row.id}">×</button>
+      </td>
+    </tr>`;
+  }).join("") : `<tr><td colspan="11">No BOM rows.</td></tr>`;
+
+  return `<div class="table-wrap scroll-card"><table class="compact-parts-table bom-table">
+    <thead><tr>${Object.values(PROJECT_COLUMN_DEFS).map((label) => `<th>${escapeHtml(label)}</th>`).join("")}</tr></thead>
+    <tbody>${body}</tbody>
+  </table></div>`;
+}

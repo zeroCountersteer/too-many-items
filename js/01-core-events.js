@@ -9,6 +9,13 @@ const state = {
   categoryFilter: "all",
   stockFilter: "all",
   packageFilter: "",
+  specFilterMin: "",
+  specFilterMax: "",
+  specFilterExtra: "",
+  selectedBulkRow: 0,
+  visibleColumns: loadJsonFromStorage(STORAGE.visibleColumns || "tmi.visibleColumns", DEFAULT_PART_COLUMNS),
+  activeProjectId: Number(localStorage.getItem(STORAGE.activeProjectId || "tmi.activeProjectId") || 0),
+  projectQuery: "",
   sortKey: "category",
   sortDir: "asc",
   githubSha: localStorage.getItem(STORAGE.githubSha) || "",
@@ -45,7 +52,7 @@ async function init() {
     history.replaceState(null, document.title, location.pathname + location.hash);
   }
   applyTheme(state.activeTheme);
-  document.body.classList.toggle("moving-bg", state.movingBackground);
+  document.body.classList.toggle("moving-bg", false);
   bindEvents();
   renderShellLoading();
   await initializeDatabaseEngine();
@@ -87,6 +94,59 @@ function handleClick(event) {
     case "import-bulk":
       importBulkParts();
       break;
+    case "add-bulk-line":
+      addBulkLine();
+      break;
+    case "clone-bulk-line":
+      cloneBulkLine(id);
+      break;
+    case "remove-bulk-line":
+      removeBulkLine(id);
+      break;
+    case "generate-series":
+      generateBulkSeries();
+      break;
+    case "import-kicad-bom":
+      importKiCadBomFromForm();
+      break;
+    case "save-columns":
+      saveVisibleColumns();
+      break;
+    case "highlight-location":
+      highlightLocation(id);
+      break;
+    case "select-project":
+      selectProject(id);
+      break;
+    case "delete-project":
+      deleteProject(id);
+      break;
+    case "reserve-project":
+      reserveProjectParts(id);
+      break;
+    case "release-project":
+      releaseProjectReservations(id);
+      break;
+    case "apply-project-consumption":
+      applyProjectConsumption(id);
+      break;
+    case "match-bom-row":
+      matchBomRow(id);
+      break;
+    case "unlink-bom-row":
+      unlinkBomRow(id);
+      break;
+    case "delete-bom-row":
+      deleteBomRow(id);
+      break;
+    case "open-edit-bom-row":
+      openBomRowModal(id);
+      break;
+    case "save-bom-row": {
+      const form = $("#bomRowForm");
+      if (form) saveBomRowFromForm(form);
+      break;
+    }
     case "open-add-part":
       openPartModal();
       break;
@@ -195,6 +255,35 @@ function handleInput(event) {
     return;
   }
 
+  if (target.matches("[data-spec-min]")) {
+    state.specFilterMin = target.value;
+    renderPartsViewOnly();
+    return;
+  }
+
+  if (target.matches("[data-spec-max]")) {
+    state.specFilterMax = target.value;
+    renderPartsViewOnly();
+    return;
+  }
+
+  if (target.matches("[data-spec-extra]")) {
+    state.specFilterExtra = target.value;
+    renderPartsViewOnly();
+    return;
+  }
+
+  if (target.matches("[data-bulk-input]")) {
+    updateBulkPreviewFromGrid();
+    return;
+  }
+
+  if (target.matches("[data-project-search]")) {
+    state.projectQuery = target.value;
+    if (state.activeView === "projects") $("#viewPanel").innerHTML = renderProjectsView();
+    return;
+  }
+
   if (target.matches("[data-theme-var]")) {
     updateCustomThemeFromInputs();
   }
@@ -227,6 +316,17 @@ function handleChange(event) {
     return;
   }
 
+  if (target.matches("[data-column-toggle]")) {
+    const column = target.value;
+    const active = new Set(state.visibleColumns || DEFAULT_PART_COLUMNS);
+    if (target.checked) active.add(column);
+    else if (column !== "actions") active.delete(column);
+    state.visibleColumns = [...active];
+    saveVisibleColumns();
+    renderPartsViewOnly();
+    return;
+  }
+
   if (target.id === "partCategorySelect") {
     const categoryName = getCategoryName(Number(target.value));
     const form = target.closest("form");
@@ -240,7 +340,7 @@ function handleChange(event) {
   if (target.id === "movingToggleSettings") {
     state.movingBackground = target.checked;
     localStorage.setItem(STORAGE.movingBackground, state.movingBackground ? "on" : "off");
-    document.body.classList.toggle("moving-bg", state.movingBackground);
+    document.body.classList.toggle("moving-bg", false);
     setStatus("appearance updated");
     return;
   }
