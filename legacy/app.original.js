@@ -1914,9 +1914,6 @@ window.addEventListener("DOMContentLoaded", () => {
 });
 
 async function init() {
-  if (location.search && /[?&](name|parentId|notes|categoryId|mpn|manufacturer)=/.test(location.search)) {
-    history.replaceState(null, document.title, location.pathname + location.hash);
-  }
   applyTheme(state.activeTheme);
   document.body.classList.toggle("moving-bg", state.movingBackground);
   bindEvents();
@@ -1931,7 +1928,7 @@ function bindEvents() {
   document.body.addEventListener("click", handleClick);
   document.body.addEventListener("input", handleInput);
   document.body.addEventListener("change", handleChange);
-  document.addEventListener("submit", handleSubmit, true);
+  document.body.addEventListener("submit", handleSubmit);
   $("#dbFileInput").addEventListener("change", importDatabaseFile);
   $("#jsonFileInput").addEventListener("change", importInventoryJsonFile);
   $("#themeFileInput").addEventListener("change", importThemeFile);
@@ -2094,30 +2091,29 @@ function handleChange(event) {
 }
 
 function handleSubmit(event) {
-  event.preventDefault();
-  event.stopPropagation();
+  if (event.target.id === "bulkImportForm") {
+    event.preventDefault();
+    importBulkParts();
+  }
 
-  const form = event.target;
-  if (!(form instanceof HTMLFormElement)) return;
+  if (event.target.id === "externalLookupForm") {
+    event.preventDefault();
+    lookupExternalPart();
+  }
 
-  switch (form.id) {
-    case "bulkImportForm":
-      importBulkParts();
-      return;
-    case "externalLookupForm":
-      lookupExternalPart();
-      return;
-    case "partForm":
-      savePartFromForm(form);
-      return;
-    case "locationForm":
-      saveLocationFromForm(form);
-      return;
-    case "settingsForm":
-      saveSettings(form);
-      return;
-    default:
-      console.warn("Blocked unhandled form submit", form);
+  if (event.target.id === "partForm") {
+    event.preventDefault();
+    savePartFromForm(event.target);
+  }
+
+  if (event.target.id === "locationForm") {
+    event.preventDefault();
+    saveLocationFromForm(event.target);
+  }
+
+  if (event.target.id === "settingsForm") {
+    event.preventDefault();
+    saveSettings(event.target);
   }
 }
 
