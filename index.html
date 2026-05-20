@@ -1,83 +1,80 @@
 <!doctype html>
 <html lang="en">
 <head>
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Too Many Items v13</title>
-<link rel="stylesheet" href="style.css">
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Too Many Items // Inventory</title>
+  <meta name="description" content="Static GitHub-backed SQLite inventory for electronic components." />
+  <link rel="stylesheet" href="style.css" />
 </head>
-<body>
-<div class="app-shell">
-  <aside class="sidebar">
-    <div class="brand">
-      <div class="tiny">nAVI</div>
-      <h1>TOO MANY ITEMS</h1>
-    </div>
+<body class="moving-bg" data-app-ready="false">
+  <div class="ambient" aria-hidden="true">
+    <span class="cloud cloud-a"></span>
+    <span class="cloud cloud-b"></span>
+    <span class="cloud cloud-c"></span>
+    <span class="grid-film"></span>
+  </div>
 
-    <nav class="nav">
-      <button>inventory</button>
-      <button>bulk add</button>
-      <button>locations</button>
-      <button>database</button>
-      <button>settings</button>
-    </nav>
-
-    <section class="db-state">
-      <div class="state-row"><span>database</span><strong>inventory.db</strong></div>
-      <div class="state-row"><span>state</span><strong>saved</strong></div>
-      <div class="state-row"><span>source</span><strong>github</strong></div>
-      <div class="state-row"><span>parts</span><strong>203</strong></div>
-      <div class="state-row"><span>stock</span><strong>9633</strong></div>
-      <div class="state-row"><span>theme</span><strong>angel cloud</strong></div>
-    </section>
-  </aside>
-
-  <main class="main">
-    <header class="header">
-      <div>
-        <div class="path">inventory / parts</div>
-        <h2>parts</h2>
+  <div class="app-shell">
+    <aside class="navi-card" aria-label="Navigation">
+      <div class="navi-head">
+        <div>
+          <p class="eyebrow">nAVI</p>
+          <h1>Too<br />Many<br />Items</h1>
+        </div>
       </div>
-    </header>
 
-    <section class="toolbar">
-      <input placeholder="search parts">
-      <select>
-        <option>all categories</option>
-      </select>
-      <select>
-        <option>sort: quantity</option>
-      </select>
-      <button>bulk add</button>
-      <button>add part</button>
-      <button>export</button>
-    </section>
+      <nav class="navi-menu" id="navMenu">
+        <button type="button" class="nav-button" data-view="parts">HOME / INVENTORY</button>
+        <button type="button" class="nav-button" data-view="add">ADD / IMPORT</button>
+        <button type="button" class="nav-button" data-view="locations">LOCATIONS / MAP</button>
+        <button type="button" class="nav-button" data-view="database">DATABASE</button>
+        <button type="button" class="nav-button" data-view="settings">SETTINGS</button>
+      </nav>
 
-    <section class="metrics">
-      <div class="metric"><strong>203</strong><span>parts</span></div>
-      <div class="metric"><strong>9633</strong><span>items</span></div>
-      <div class="metric"><strong>1</strong><span>locations</span></div>
-      <div class="metric"><strong>0</strong><span>low stock</span></div>
-    </section>
+      <div class="tiny-panel connection-panel db-status-panel">
+        <p class="panel-title">database</p>
+        <p id="navDbName">inventory.db</p>
+        <p id="navDbState" class="muted">initializing</p>
+        <div id="navDbDetails" class="db-state-grid"></div>
+      </div>
+    </aside>
 
-    <section class="table-card">
-      <table>
-        <thead>
-          <tr>
-            <th>part</th>
-            <th>category</th>
-            <th>pkg</th>
-            <th>qty</th>
-            <th>location</th>
-            <th></th>
-          </tr>
-        </thead>
-        <tbody id="rows"></tbody>
-      </table>
-    </section>
-  </main>
-</div>
+    <main class="main-window" aria-live="polite">
+      <header class="window-chrome">
+        <div>
+          <p class="path-line" id="pathLine">INVENTORY / PARTS</p>
+          <h2 id="windowTitle">electronic components</h2>
+        </div>
+        <div class="chrome-actions" id="chromeActions"></div>
+      </header>
 
-<script src="js/app.js"></script>
+      <section class="notice-line" id="noticeLine" hidden></section>
+
+      <section class="metrics-grid" id="metricsGrid" aria-label="Inventory summary"></section>
+
+      <section class="content-card" id="viewPanel"></section>
+    </main>
+
+  </div>
+
+  <input id="dbFileInput" type="file" accept=".db,.sqlite,.sqlite3,application/octet-stream,application/vnd.sqlite3" hidden />
+  <input id="jsonFileInput" type="file" accept="application/json,.json" hidden />
+  <input id="themeFileInput" type="file" accept="application/json,.json" multiple hidden />
+  <div id="modalRoot"></div>
+
+  <noscript>
+    <div class="noscript">This inventory app requires JavaScript. It does not use a backend.</div>
+  </noscript>
+
+  <script src="https://cdn.jsdelivr.net/npm/sql.js@1.10.3/dist/sql-wasm.js"></script>
+  <script src="js/00-config.js?v=13"></script>
+  <script src="js/06-inventory-model.js?v=13"></script>
+  <script src="js/05-database.js?v=13"></script>
+  <script src="js/07-theme-utils.js?v=13"></script>
+  <script src="js/02-render.js?v=13"></script>
+  <script src="js/04-editors.js?v=13"></script>
+  <script src="js/03-bulk-and-api.js?v=13"></script>
+  <script src="js/01-core-events.js?v=13"></script>
 </body>
 </html>

@@ -30,59 +30,47 @@ function renderNavigation() {
   });
   const navName = $("#navDbName");
   const navState = $("#navDbState");
+  const navDetails = $("#navDbDetails");
+  const metrics = getMetrics();
   if (navName) navName.textContent = state.dbFileName || "inventory.db";
   if (navState) navState.textContent = databaseStateLabel();
+  if (navDetails) {
+    const source = state.githubConfig?.repo ? "github" : (state.dbSource || "local");
+    navDetails.innerHTML = [
+      ["source", source],
+      ["parts", metrics.parts],
+      ["stock", metrics.quantity],
+      ["locations", metrics.locations],
+      ["updated", formatDate(state.inventory.meta?.updatedAt) || "--"]
+    ].map(([key, value]) => `<div><span>${escapeHtml(String(key))}</span><strong>${escapeHtml(String(value))}</strong></div>`).join("");
+  }
 }
 
 function renderHeader() {
   const titles = {
-    parts: ["INVENTORY / PARTS", "electronic components"],
-    add: ["INVENTORY / ADD", "bulk component entry"],
-    locations: ["INVENTORY / LOCATIONS", "storage map"],
-    database: ["INVENTORY / DATABASE", "sqlite storage"],
-    settings: ["INVENTORY / SETTINGS", "configuration"]
+    parts: ["INVENTORY / PARTS", "parts"],
+    add: ["INVENTORY / ADD", "bulk add"],
+    locations: ["INVENTORY / LOCATIONS", "locations"],
+    database: ["INVENTORY / DATABASE", "database"],
+    settings: ["INVENTORY / SETTINGS", "settings"]
   };
   const [path, title] = titles[state.activeView] || titles.parts;
   $("#pathLine").textContent = path;
   $("#windowTitle").textContent = title;
-
-  const actions = [];
-  if (state.activeView === "parts") {
-    actions.push(`<button type="button" data-action="set-view" data-target-view="add">bulk add</button>`);
-    actions.push(`<button type="button" class="primary-button" data-action="open-add-part">+ add part</button>`);
-  } else if (state.activeView === "add") {
-    actions.push(`<button type="button" data-action="set-view" data-target-view="parts">parts list</button>`);
-    actions.push(`<button type="button" class="primary-button" data-action="open-add-part">+ manual part</button>`);
-  } else if (state.activeView === "locations") {
-    actions.push(`<button type="button" data-action="export-db">export .db</button>`);
-    actions.push(`<button type="button" class="primary-button" data-action="open-add-location">+ add location</button>`);
-  } else if (state.activeView === "database") {
-    actions.push(`<button type="button" data-action="import-db">open .db</button>`);
-    actions.push(`<button type="button" class="primary-button" data-action="export-db">export .db</button>`);
-  }
-  $("#chromeActions").innerHTML = actions.join("");
-
-  const cfg = state.githubConfig;
-  const archiveName = $("#archiveName");
-  const archiveSubline = $("#archiveSubline");
-  if (archiveName) {
-    const archive = cfg.repo ? `${cfg.owner}/${cfg.repo}` : state.dbFileName || "inventory.db";
-    archiveName.textContent = archive;
-  }
-  if (archiveSubline) {
-    archiveSubline.textContent = cfg.repo ? `${cfg.branch || "main"}:${cfg.path || BUNDLED_DB_PATH}` : state.dbSource;
-  }
+  $("#chromeActions").innerHTML = "";
 
   const notice = $("#noticeLine");
+  if (!notice) return;
+  let text = "";
   if (state.sqliteError) {
-    notice.textContent = `SQLite engine is not available: ${state.sqliteError}`;
+    text = `SQLite engine is not available: ${state.sqliteError}`;
   } else if (state.inventory.parts.length === 0) {
-    notice.textContent = "database is empty: add the first part, open an existing .db file, or load inventory.db from GitHub";
+    text = "Database is empty. Add the first part or open inventory.db.";
   } else if (state.dbDirty) {
-    notice.textContent = "local changes are saved in this browser; export or commit the database when ready";
-  } else {
-    notice.textContent = `database loaded: ${state.dbSource}`;
+    text = "Local changes are not committed to GitHub yet.";
   }
+  notice.textContent = text;
+  notice.hidden = !text;
 }
 
 function renderMetrics() {
@@ -155,7 +143,10 @@ function renderPartsView() {
     <div class="view-head compact-head">
       <h3 class="view-title"><span>parts</span> / ${filtered.length} shown</h3>
       <div class="tool-row compact-tools">
+        <button type="button" data-action="set-view" data-target-view="add">bulk add</button>
         <button type="button" data-action="add-category">+ category</button>
+        <button type="button" class="primary-button" data-action="open-add-part">+ add part</button>
+        <button type="button" data-action="export-db">export</button>
       </div>
     </div>
     <div class="toolbar-grid parts-toolbar">
@@ -308,6 +299,10 @@ function renderLocationsView() {
   return `
     <div class="view-head compact-head">
       <h3 class="view-title"><span>storage_map</span> / locations</h3>
+      <div class="tool-row compact-tools">
+        <button type="button" class="primary-button" data-action="open-add-location">+ add location</button>
+        <button type="button" data-action="export-db">export</button>
+      </div>
     </div>
     ${cards}
   `;
