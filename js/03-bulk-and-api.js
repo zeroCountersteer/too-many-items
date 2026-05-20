@@ -302,17 +302,38 @@ function parseResistance(value) {
 }
 
 function parseCapacitance(value) {
-  const raw = textValue(value).replace("µ", "u").replace(",", ".");
-  if (!raw) return null;
-  if (/^\d{3}$/.test(raw)) return Number(raw.slice(0, 2)) * Math.pow(10, Number(raw[2])) * 1e-12;
-  const match = raw.match(/^([0-9]*\.?[0-9]+)\s*(pf|nf|uf|mf|f)?$/i);
-  if (!match) return null;
-  const n = Number(match[1]);
-  const unit = String(match[2] || "f").toLowerCase();
-  const mult = unit === "pf" ? 1e-12 : unit === "nf" ? 1e-9 : unit === "uf" ? 1e-6 : unit === "mf" ? 1e-3 : 1;
-  return Number.isFinite(n) ? n * mult : null;
-}
 
+  const text =
+  String(value)
+  .trim()
+  .toUpperCase();
+
+  const match =
+  text.match(/^([0-9]*\.?[0-9]+)\s*(P|N|U|UF|NF|PF)?$/);
+
+  if (!match) return null;
+
+  const number = Number(match[1]);
+  const unit = match[2] || "P";
+
+  switch (unit) {
+
+    case "P":
+    case "PF":
+      return number * 1e-12;
+
+    case "N":
+    case "NF":
+      return number * 1e-9;
+
+    case "U":
+    case "UF":
+      return number * 1e-6;
+
+    default:
+      return null;
+  }
+}
 function parseInductance(value) {
   const raw = textValue(value).replace("µ", "u").replace(",", ".");
   if (!raw) return null;
