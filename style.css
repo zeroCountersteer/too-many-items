@@ -1501,3 +1501,30 @@ body[data-app-ready="false"] .side-stack {
     grid-template-columns: 1fr;
   }
 }
+
+/* v10 simplified bulk add */
+.add-import-grid.single-column {
+  grid-template-columns: 1fr;
+}
+
+.bulk-help-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+  margin: 14px 0;
+}
+
+.bulk-help-grid .tiny-panel {
+  margin: 0;
+}
+
+.bulk-help-grid code {
+  font-family: var(--font-mono);
+  color: var(--accent-strong);
+}
+
+@media (max-width: 860px) {
+  .bulk-help-grid {
+    grid-template-columns: 1fr;
+  }
+}

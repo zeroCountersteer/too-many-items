@@ -303,7 +303,6 @@ function saveSettings(form) {
     path: textValue(fd.get("path")) || BUNDLED_DB_PATH
   };
   localStorage.setItem(STORAGE.githubConfig, JSON.stringify(state.githubConfig));
-  saveExternalApiSettings(fd);
   const token = textValue(fd.get("token"));
   if (token) sessionStorage.setItem(STORAGE.token, token);
   setStatus("settings saved");
@@ -321,32 +320,11 @@ function captureSettingsFormIfPresent() {
     path: textValue(fd.get("path")) || BUNDLED_DB_PATH
   };
   localStorage.setItem(STORAGE.githubConfig, JSON.stringify(state.githubConfig));
-  saveExternalApiSettings(fd);
   const token = textValue(fd.get("token"));
   if (token) sessionStorage.setItem(STORAGE.token, token);
 }
 
 
-function saveExternalApiSettings(fd) {
-  if (!fd.has("apiProvider")) return;
-  state.externalApiConfig = {
-    provider: textValue(fd.get("apiProvider")) || "nexar",
-    genericUrlTemplate: textValue(fd.get("genericUrlTemplate")),
-    ultraUrlTemplate: textValue(fd.get("ultraUrlTemplate")),
-    bearerPrefix: textValue(fd.get("apiBearerPrefix")) || "Bearer"
-  };
-  localStorage.setItem(STORAGE.externalApiConfig, JSON.stringify(state.externalApiConfig));
-  const externalToken = textValue(fd.get("externalApiToken"));
-  if (externalToken) sessionStorage.setItem(STORAGE.externalApiToken, externalToken);
-}
-
-function externalApiConfigured(provider) {
-  const cfg = state.externalApiConfig || {};
-  if (provider === "nexar") return !!sessionStorage.getItem(STORAGE.externalApiToken);
-  if (provider === "ultralibrarian") return !!cfg.ultraUrlTemplate;
-  if (provider === "generic") return !!cfg.genericUrlTemplate;
-  return false;
-}
 
 function requireGitHubConfig() {
   const token = sessionStorage.getItem(STORAGE.token);

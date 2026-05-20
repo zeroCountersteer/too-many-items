@@ -37,7 +37,7 @@ function renderNavigation() {
 function renderHeader() {
   const titles = {
     parts: ["INVENTORY / PARTS", "electronic components"],
-    add: ["INVENTORY / ADD", "batch import and api lookup"],
+    add: ["INVENTORY / ADD", "bulk component entry"],
     locations: ["INVENTORY / LOCATIONS", "storage map"],
     database: ["INVENTORY / DATABASE", "sqlite storage"],
     settings: ["INVENTORY / SETTINGS", "configuration"]
@@ -49,7 +49,7 @@ function renderHeader() {
   const actions = [];
   if (state.activeView === "parts") {
     actions.push(`<button type="button" data-action="export-db">export .db</button>`);
-    actions.push(`<button type="button" data-action="set-view" data-target-view="add">batch / api</button>`);
+    actions.push(`<button type="button" data-action="set-view" data-target-view="add">bulk add</button>`);
     actions.push(`<button type="button" class="primary-button" data-action="open-add-part">+ add part</button>`);
   } else if (state.activeView === "add") {
     actions.push(`<button type="button" data-action="set-view" data-target-view="parts">parts list</button>`);
@@ -141,7 +141,7 @@ function renderPartsView() {
       <h3 class="view-title"><span>information</span> / parts overview</h3>
       <div class="tool-row">
         <button type="button" data-action="add-category">+ category</button>
-        <button type="button" data-action="set-view" data-target-view="add">batch / api</button>
+        <button type="button" data-action="set-view" data-target-view="add">bulk add</button>
         <button type="button" class="primary-button" data-action="open-add-part">+ add part</button>
       </div>
     </div>
@@ -202,26 +202,21 @@ function renderAddImportView() {
   const locations = [`<option value="">no default location</option>`].concat(
     state.inventory.locations.map((location) => `<option value="${location.id}">${escapeHtml(locationPath(location.id))}</option>`)
   ).join("");
-  const provider = state.externalApiConfig.provider || "nexar";
-  const apiConfigured = externalApiConfigured(provider);
-  const apiResults = state.externalResults.length
-    ? `<div class="api-result-list">${state.externalResults.map((item, index) => renderExternalResult(item, index)).join("")}</div>`
-    : `<div class="empty-state compact"><div><h3>no api results</h3><p>Search by manufacturer part number, then review a result before adding it to the database.</p></div></div>`;
 
   return `
     <div class="view-head">
-      <h3 class="view-title"><span>add</span> / batch and api</h3>
+      <h3 class="view-title"><span>add</span> / bulk component entry</h3>
       <div class="tool-row">
         <button type="button" data-action="set-view" data-target-view="parts">parts list</button>
         <button type="button" class="primary-button" data-action="open-add-part">+ manual part</button>
       </div>
     </div>
 
-    <div class="add-import-grid">
+    <div class="add-import-grid single-column">
       <section class="database-card add-card">
-        <h4>bulk add passive parts</h4>
-        <p class="small-note">Paste many values at once. Header rows are supported. Without headers the default resistor order is: value, quantity, package, tolerance, power, voltage, location, min, source.</p>
-        <form id="bulkImportForm">
+        <h4>bulk add with shared defaults</h4>
+        <p class="small-note">Use this when many parts have the same package, footprint, tolerance, power, voltage, source, and location. Then paste only value and quantity per row.</p>
+        <form id="bulkImportForm" novalidate onsubmit="return false;">
           <div class="form-grid">
             <div class="field"><label>kind</label><select name="kind">
               <option value="resistor">resistors</option>
@@ -229,19 +224,44 @@ function renderAddImportView() {
               <option value="inductor">inductors</option>
               <option value="generic">generic parts</option>
             </select></div>
-            <div class="field"><label>default package</label><input name="defaultPackage" placeholder="0603" /></div>
-            <div class="field"><label>default footprint</label><input name="defaultFootprint" placeholder="R_0603_1608Metric" /></div>
-            <div class="field"><label>default qty</label><input name="defaultQuantity" type="number" min="0" step="1" value="0" /></div>
-            <div class="field"><label>default min</label><input name="defaultMin" type="number" min="0" step="1" value="0" /></div>
-            <div class="field"><label>default location</label><select name="defaultLocationId">${locations}</select></div>
-            <div class="field"><label>new location by name</label><input name="defaultLocationName" placeholder="A01 resistors" /></div>
+            <div class="field"><label>package</label><input name="defaultPackage" placeholder="0603" /></div>
+            <div class="field"><label>footprint</label><input name="defaultFootprint" placeholder="R_0603_1608Metric" /></div>
+            <div class="field"><label>default qty if row omits it</label><input name="defaultQuantity" type="number" min="0" step="1" value="0" /></div>
+            <div class="field"><label>min stock</label><input name="defaultMin" type="number" min="0" step="1" value="0" /></div>
+            <div class="field"><label>location</label><select name="defaultLocationId">${locations}</select></div>
+            <div class="field"><label>or new location name</label><input name="defaultLocationName" placeholder="GDK / resistors / 0603" /></div>
             <div class="field"><label>source</label><input name="defaultSource" placeholder="LCSC, AliExpress, Mouser" /></div>
             <div class="field"><label>tolerance %</label><input name="defaultTolerance" placeholder="1" /></div>
             <div class="field"><label>power W</label><input name="defaultPower" placeholder="0.1 or 1/10W" /></div>
             <div class="field"><label>voltage V</label><input name="defaultVoltage" placeholder="50" /></div>
             <label class="switch-row inline-switch"><span>merge matching existing parts</span><input name="mergeExisting" type="checkbox" checked /></label>
           </div>
-          <div class="field"><label>rows</label><textarea name="bulkText" class="bulk-textarea" spellcheck="false" placeholder="10R,100,0603,1%,0.1W\n22R,100,0603,1%,0.1W\n4.7k,200,0603,1%,0.1W\n100k,100,0603,1%,0.1W"></textarea></div>
+
+          <div class="bulk-help-grid">
+            <div class="tiny-panel">
+              <p class="panel-title">simple rows</p>
+              <p><code>value quantity</code></p>
+              <p class="small-note">Example: <code>4.7k 200</code></p>
+            </div>
+            <div class="tiny-panel">
+              <p class="panel-title">optional row fields</p>
+              <p><code>value quantity min location source</code></p>
+              <p class="small-note">Use CSV, TSV, semicolon, or spaces.</p>
+            </div>
+            <div class="tiny-panel">
+              <p class="panel-title">headers</p>
+              <p><code>value,quantity,mpn,manufacturer</code></p>
+              <p class="small-note">Headers override positional parsing.</p>
+            </div>
+          </div>
+
+          <div class="field"><label>rows</label><textarea name="bulkText" class="bulk-textarea" spellcheck="false" placeholder="10R 100
+22R 100
+100R 200
+1k 200
+4.7k 200
+10k 300
+100k 100"></textarea></div>
           <div class="database-actions">
             <button type="button" data-action="preview-bulk">preview</button>
             <button type="button" class="primary-button" data-action="import-bulk">import rows</button>
@@ -249,48 +269,10 @@ function renderAddImportView() {
         </form>
         <div id="bulkPreview" class="bulk-preview"></div>
       </section>
-
-      <section class="database-card add-card">
-        <h4>external part lookup</h4>
-        <p class="small-note">Uses the connector selected in Settings. Nexar works with an application access token; Ultra Librarian and generic REST use a URL template that must return JSON and allow browser CORS.</p>
-        <form id="externalLookupForm">
-          <div class="form-grid">
-            <div class="field"><label>provider</label><select name="provider">
-              <option value="nexar" ${provider === "nexar" ? "selected" : ""}>Nexar / Octopart</option>
-              <option value="ultralibrarian" ${provider === "ultralibrarian" ? "selected" : ""}>Ultra Librarian template</option>
-              <option value="generic" ${provider === "generic" ? "selected" : ""}>Generic REST JSON</option>
-            </select></div>
-            <div class="field span-2"><label>mpn or search text</label><input name="query" value="${escapeAttr(state.externalLastQuery)}" placeholder="TPS25751D, STM32F103C8T6, RC0603FR-0710KL" /></div>
-            <div class="field"><label>manufacturer hint</label><input name="manufacturer" placeholder="Texas Instruments" /></div>
-          </div>
-          <p class="small-note">provider status: ${apiConfigured ? "configured" : "needs settings"}</p>
-          <div class="database-actions">
-            <button type="button" data-action="open-api-settings">api settings</button>
-            <button type="button" class="primary-button" data-action="lookup-external-part">search</button>
-          </div>
-        </form>
-        ${apiResults}
-      </section>
     </div>
   `;
 }
 
-function renderExternalResult(item, index) {
-  const sub = [item.manufacturer, item.mpn].filter(Boolean).join(" / ") || "unknown manufacturer/mpn";
-  const chips = [item.categoryName, item.package, item.footprint].filter(Boolean).map((value) => `<span class="tag-pill">${escapeHtml(value)}</span>`).join("");
-  return `<article class="api-result">
-    <div>
-      <h4>${escapeHtml(item.name || item.mpn || "external part")}</h4>
-      <p class="small-note">${escapeHtml(sub)}</p>
-      ${item.description ? `<p>${escapeHtml(item.description)}</p>` : ""}
-      <div class="tag-row">${chips}</div>
-    </div>
-    <div class="api-result-actions">
-      ${item.datasheetUrl ? `<a class="ghost-link" href="${escapeAttr(item.datasheetUrl)}" target="_blank" rel="noreferrer">datasheet</a>` : ""}
-      <button type="button" class="primary-button" data-action="add-api-result" data-index="${index}">review + add</button>
-    </div>
-  </article>`;
-}
 
 function renderLocationsView() {
   const locations = state.inventory.locations;
@@ -386,8 +368,6 @@ function renderDatabaseView() {
 function renderSettingsView() {
   const cfg = state.githubConfig;
   const tokenPresent = sessionStorage.getItem(STORAGE.token) ? "token active for this tab" : "token not set";
-  const apiCfg = state.externalApiConfig || {};
-  const apiTokenPresent = sessionStorage.getItem(STORAGE.externalApiToken) ? "api token active for this tab" : "api token not set";
   const themeOptions = allThemes().map((theme) => `<option value="${escapeAttr(theme.id)}" ${theme.id === state.activeTheme ? "selected" : ""}>${escapeHtml(theme.name)}</option>`).join("");
   const current = getTheme(state.activeTheme) || BUILTIN_THEMES.angelCloud;
   const editor = THEME_FIELDS.map((key) => {
@@ -422,21 +402,6 @@ function renderSettingsView() {
         </section>
 
 
-        <section class="settings-card">
-          <h4>external APIs</h4>
-          <div class="form-grid">
-            <div class="field"><label>default provider</label><select name="apiProvider">
-              <option value="nexar" ${apiCfg.provider === "nexar" ? "selected" : ""}>Nexar / Octopart</option>
-              <option value="ultralibrarian" ${apiCfg.provider === "ultralibrarian" ? "selected" : ""}>Ultra Librarian template</option>
-              <option value="generic" ${apiCfg.provider === "generic" ? "selected" : ""}>Generic REST JSON</option>
-            </select></div>
-            <div class="field"><label>auth prefix</label><input name="apiBearerPrefix" value="${escapeAttr(apiCfg.bearerPrefix || "Bearer")}" placeholder="Bearer" /></div>
-            <div class="field span-2"><label>api token</label><input type="password" name="externalApiToken" placeholder="session only" autocomplete="off" /></div>
-            <div class="field span-2"><label>Ultra Librarian URL template</label><input name="ultraUrlTemplate" value="${escapeAttr(apiCfg.ultraUrlTemplate || "")}" placeholder="https://api.example.com/search?q={q}" /></div>
-            <div class="field span-2"><label>generic REST URL template</label><input name="genericUrlTemplate" value="${escapeAttr(apiCfg.genericUrlTemplate || "")}" placeholder="https://api.example.com/parts?mpn={q}&mfr={manufacturer}" /></div>
-          </div>
-          <p class="small-note">${escapeHtml(apiTokenPresent)}. Tokens are kept in sessionStorage only. Do not put client secrets in a public GitHub Pages site.</p>
-        </section>
 
         <section class="settings-card">
           <h4>appearance</h4>

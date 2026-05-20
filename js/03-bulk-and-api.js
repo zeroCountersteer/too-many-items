@@ -225,9 +225,9 @@ function headerAlias(name) {
 function rowFromPositional(cells, kind) {
   const row = {};
   const maps = {
-    resistor: ["value", "quantity", "package", "tolerance", "power", "voltage", "location", "minQuantity", "source"],
-    capacitor: ["value", "voltage", "quantity", "package", "dielectric", "tolerance", "location", "minQuantity", "source"],
-    inductor: ["value", "current", "quantity", "package", "dcr", "location", "minQuantity", "source"],
+    resistor: ["value", "quantity", "minQuantity", "location", "source", "mpn", "manufacturer"],
+    capacitor: ["value", "quantity", "minQuantity", "location", "source", "mpn", "manufacturer"],
+    inductor: ["value", "quantity", "minQuantity", "location", "source", "mpn", "manufacturer"],
     generic: ["name", "quantity", "category", "package", "footprint", "location", "mpn", "manufacturer"]
   };
   (maps[kind] || maps.generic).forEach((key, index) => { row[key] = cells[index] ?? ""; });
@@ -249,147 +249,6 @@ function findMatchingPart(part, kind, spec) {
   });
 }
 
-async function lookupExternalPart() {
-  const form = $("#externalLookupForm");
-  if (!form) return;
-  const fd = new FormData(form);
-  const provider = textValue(fd.get("provider")) || state.externalApiConfig.provider || "nexar";
-  const query = textValue(fd.get("query"));
-  const manufacturer = textValue(fd.get("manufacturer"));
-  if (!query) { toast("enter MPN or search text", "error"); return; }
-  state.externalLastQuery = query;
-  state.externalApiConfig.provider = provider;
-  localStorage.setItem(STORAGE.externalApiConfig, JSON.stringify(state.externalApiConfig));
-  setStatus(`searching ${provider}...`);
-  try {
-    let results;
-    if (provider === "nexar") results = await lookupNexar(query);
-    else results = await lookupGenericProvider(provider, query, manufacturer);
-    state.externalResults = results;
-    setStatus(`${results.length} external result${results.length === 1 ? "" : "s"}`);
-    render();
-  } catch (error) {
-    setStatus("external lookup failed");
-    toast(error.message, "error");
-  }
-}
-
-async function lookupNexar(mpn) {
-  const token = sessionStorage.getItem(STORAGE.externalApiToken);
-  if (!token) throw new Error("paste Nexar application access token in Settings first");
-  const query = `query ($mpn: String!) { supSearchMpn(q: $mpn) { hits results { part { id name mpn manufacturer { name } shortDescription descriptions { text } category { id name path } specs { attribute { name shortname } displayValue value unitsName unitsSymbol } } } } }`;
-  const response = await fetch("https://api.nexar.com/graphql", {
-    method: "POST",
-    headers: { "Content-Type": "application/json", token },
-    body: JSON.stringify({ query, variables: { mpn } })
-  });
-  const data = await response.json();
-  if (!response.ok || data.errors) throw new Error((data.errors || []).map((err) => err.message).join("; ") || `${response.status} ${response.statusText}`);
-  return (data.data?.supSearchMpn?.results || []).map((result) => normalizeExternalCandidate(result.part || result)).filter((item) => item.name || item.mpn);
-}
-
-async function lookupGenericProvider(provider, q, manufacturer) {
-  const cfg = state.externalApiConfig || {};
-  const template = provider === "ultralibrarian" ? cfg.ultraUrlTemplate : cfg.genericUrlTemplate;
-  if (!template) throw new Error(`${provider} URL template is not configured in Settings`);
-  const url = buildTemplateUrl(template, { q, mpn: q, manufacturer });
-  const headers = { Accept: "application/json" };
-  const token = sessionStorage.getItem(STORAGE.externalApiToken);
-  if (token) headers.Authorization = `${cfg.bearerPrefix || "Bearer"} ${token}`.trim();
-  const response = await fetch(url, { headers });
-  if (!response.ok) throw new Error(`${response.status} ${response.statusText}`);
-  const data = await response.json();
-  return extractGenericApiResults(data).map(normalizeExternalCandidate).filter((item) => item.name || item.mpn);
-}
-
-function buildTemplateUrl(template, values) {
-  return String(template).replace(/\{(q|mpn|manufacturer)\}/g, (_, key) => encodeURIComponent(values[key] || ""));
-}
-
-function extractGenericApiResults(data) {
-  if (Array.isArray(data)) return data;
-  const candidates = [data.results, data.items, data.parts, data.data?.results, data.data?.items, data.data?.parts, data.data?.supSearchMpn?.results];
-  const found = candidates.find(Array.isArray);
-  return found || [data];
-}
-
-function normalizeExternalCandidate(raw) {
-  const part = raw?.part || raw || {};
-  const specs = Array.isArray(part.specs) ? part.specs : [];
-  const specMap = Object.fromEntries(specs.map((spec) => {
-    const key = spec.attribute?.shortname || spec.attribute?.name || spec.name || spec.key;
-    const value = spec.displayValue || spec.value || spec.valueText || spec.text;
-    return key ? [String(key).toLowerCase(), value] : null;
-  }).filter(Boolean));
-  const mpn = nullableText(part.mpn ?? part.MPN ?? part.partNumber ?? part.part_number ?? part.manufacturerPartNumber);
-  const manufacturer = nullableText(part.manufacturer?.name ?? part.manufacturer ?? part.mfr ?? part.brand);
-  const description = nullableText(part.shortDescription ?? part.description ?? part.descriptions?.[0]?.text ?? part.summary);
-  const categoryName = inferCategoryFromExternal(part.category?.name ?? part.category ?? part.categoryName ?? description ?? "");
-  const datasheetUrl = nullableText(part.datasheetUrl ?? part.datasheet_url ?? part.datasheet?.url ?? part.datasheets?.[0]?.url);
-  const packageName = nullableText(part.package ?? part.casePackage ?? specMap.package ?? specMap.case_package);
-  const kind = categoryKind(categoryName);
-  const spec = externalSpecFromMap(kind, specMap);
-  return {
-    name: nullableText(part.name) || [mpn, description].filter(Boolean).join(" ") || mpn,
-    manufacturer,
-    mpn,
-    footprint: nullableText(part.footprint ?? part.landPattern ?? part.kicadFootprint),
-    package: packageName,
-    description,
-    datasheetUrl,
-    categoryName,
-    spec,
-    notes: raw ? `Imported from external API. Raw keys: ${Object.keys(raw).slice(0, 12).join(", ")}` : null
-  };
-}
-
-function externalSpecFromMap(kind, specMap) {
-  if (!kind) return null;
-  const pick = (...keys) => keys.map((key) => specMap[key.toLowerCase()]).find((value) => value !== undefined && value !== null && value !== "");
-  if (kind === "resistor") {
-    const resistanceOhm = parseResistance(pick("resistance", "resistance_ohm", "r"));
-    if (resistanceOhm === null) return null;
-    return {
-      resistanceOhm,
-      tolerancePercent: nullableNumber(cleanPercent(pick("tolerance", "tolerance_percent"))),
-      powerW: parsePower(pick("power", "power_w", "power rating")),
-      voltageV: nullableNumber(cleanVoltage(pick("voltage", "voltage_rating")))
-    };
-  }
-  if (kind === "capacitor") {
-    const capacitanceF = parseCapacitance(pick("capacitance", "capacitance_f", "c"));
-    if (capacitanceF === null) return null;
-    return {
-      capacitanceF,
-      voltageV: nullableNumber(cleanVoltage(pick("voltage", "voltage_rating"))),
-      tolerancePercent: nullableNumber(cleanPercent(pick("tolerance", "tolerance_percent"))),
-      dielectric: nullableText(pick("dielectric", "temperature coefficient"))
-    };
-  }
-  if (kind === "inductor") {
-    const inductanceH = parseInductance(pick("inductance", "inductance_h", "l"));
-    if (inductanceH === null) return null;
-    return {
-      inductanceH,
-      currentA: nullableNumber(cleanCurrent(pick("current", "current_rating"))),
-      resistanceOhm: parseResistance(pick("dcr", "dc resistance", "resistance"))
-    };
-  }
-  return null;
-}
-
-function inferCategoryFromExternal(text) {
-  const lower = String(text || "").toLowerCase();
-  if (lower.includes("resistor")) return "resistor";
-  if (lower.includes("capacitor")) return "capacitor";
-  if (lower.includes("inductor")) return "inductor";
-  if (lower.includes("switch")) return "keyswitch";
-  if (lower.includes("connector")) return "connector";
-  if (lower.includes("diode")) return "diode";
-  if (lower.includes("transistor") || lower.includes("mosfet") || lower.includes("bjt")) return "transistor";
-  if (lower.includes("module")) return "module";
-  return "ic";
-}
 
 function categoryIdFromName(name) {
   if (!name) return null;

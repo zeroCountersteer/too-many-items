@@ -15,9 +15,7 @@ const STORAGE = {
   activeTheme: "tmi.v3.activeTheme",
   customThemes: "tmi.v3.customThemes",
   movingBackground: "tmi.v3.movingBackground",
-  token: "tmi.v3.github.token",
-  externalApiConfig: "tmi.v5.external.api.config",
-  externalApiToken: "tmi.v5.external.api.token"
+  token: "tmi.v3.github.token"
 };
 
 const DEFAULT_CATEGORIES = [

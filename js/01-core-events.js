@@ -17,14 +17,6 @@ const state = {
   customThemes: loadJsonFromStorage(STORAGE.customThemes, {}),
   activeTheme: localStorage.getItem(STORAGE.activeTheme) || "angelCloud",
   movingBackground: localStorage.getItem(STORAGE.movingBackground) !== "off",
-  externalApiConfig: loadJsonFromStorage(STORAGE.externalApiConfig, {
-    provider: "nexar",
-    genericUrlTemplate: "",
-    ultraUrlTemplate: "",
-    bearerPrefix: "Bearer"
-  }),
-  externalResults: [],
-  externalLastQuery: "",
   dbSource: localStorage.getItem(STORAGE.dbSource) || "not loaded",
   dbFileName: "inventory.db",
   dbDirty: localStorage.getItem(STORAGE.dbDirty) === "1",
@@ -90,15 +82,6 @@ function handleClick(event) {
       break;
     case "import-bulk":
       importBulkParts();
-      break;
-    case "lookup-external-part":
-      lookupExternalPart();
-      break;
-    case "add-api-result":
-      openPartModal(null, state.externalResults[Number(actionTarget.dataset.index)] || null);
-      break;
-    case "open-api-settings":
-      setView("settings");
       break;
     case "open-add-part":
       openPartModal();
@@ -252,7 +235,6 @@ function handleSubmit(event) {
 
   const handlers = {
     bulkImportForm: () => importBulkParts(),
-    externalLookupForm: () => lookupExternalPart(),
     partForm: () => savePartFromForm(form),
     locationForm: () => saveLocationFromForm(form),
     settingsForm: () => saveSettings(form)
