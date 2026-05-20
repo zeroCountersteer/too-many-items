@@ -118,6 +118,21 @@ function handleClick(event) {
     case "delete-location":
       deleteLocation(id);
       break;
+    case "save-part": {
+      const form = $("#partForm");
+      if (form) savePartFromForm(form);
+      break;
+    }
+    case "save-location": {
+      const form = $("#locationForm");
+      if (form) saveLocationFromForm(form);
+      break;
+    }
+    case "save-settings": {
+      const form = $("#settingsForm");
+      if (form) saveSettings(form);
+      break;
+    }
     case "close-modal":
       closeModal();
       break;
@@ -228,28 +243,32 @@ function handleSubmit(event) {
   event.preventDefault();
   event.stopPropagation();
 
-  const form = event.target;
-  if (!(form instanceof HTMLFormElement)) return;
+  const target = event.target;
+  const form = target instanceof HTMLFormElement
+    ? target
+    : target?.closest?.("form");
 
-  switch (form.id) {
-    case "bulkImportForm":
-      importBulkParts();
-      return;
-    case "externalLookupForm":
-      lookupExternalPart();
-      return;
-    case "partForm":
-      savePartFromForm(form);
-      return;
-    case "locationForm":
-      saveLocationFromForm(form);
-      return;
-    case "settingsForm":
-      saveSettings(form);
-      return;
-    default:
-      console.warn("Blocked unhandled form submit", form);
+  if (!form) return false;
+
+  const handlers = {
+    bulkImportForm: () => importBulkParts(),
+    externalLookupForm: () => lookupExternalPart(),
+    partForm: () => savePartFromForm(form),
+    locationForm: () => saveLocationFromForm(form),
+    settingsForm: () => saveSettings(form)
+  };
+
+  const handler = handlers[form.id];
+  if (handler) {
+    handler();
+    return false;
   }
+
+  // Modal/editor forms must never fall through to native GET navigation.
+  // Unknown forms are simply cancelled and reported in the status line.
+  console.warn("Cancelled unknown form submit", form.id || form.className || form);
+  setStatus("form submit cancelled");
+  return false;
 }
 
 function setView(view) {

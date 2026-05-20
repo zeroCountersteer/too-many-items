@@ -11,7 +11,7 @@ function openPartModal(partId = null, prefill = null) {
   const categoryOptions = state.inventory.categories.map((category) => `<option value="${category.id}" ${category.id === categoryId ? "selected" : ""}>${escapeHtml(category.name)}</option>`).join("");
 
   openModal(`
-    <form id="partForm" class="modal-card">
+    <form id="partForm" class="modal-card" novalidate>
       <div class="modal-head">
         <div><p class="path-line">inventory / part editor</p><h3>${title}</h3></div>
         <button type="button" class="icon-button" data-action="close-modal">×</button>
@@ -39,7 +39,7 @@ function openPartModal(partId = null, prefill = null) {
       <div class="form-actions">
         ${part ? `<button type="button" class="danger-button" data-action="delete-part" data-id="${part.id}">delete</button>` : ""}
         <button type="button" class="ghost-button" data-action="close-modal">cancel</button>
-        <button type="submit" class="primary-button">save part</button>
+        <button type="button" class="primary-button" data-action="save-part">save part</button>
       </div>
     </form>
   `);
@@ -203,7 +203,7 @@ function openLocationModal(locationId = null) {
   ).join("");
 
   openModal(`
-    <form id="locationForm" class="modal-card">
+    <form id="locationForm" class="modal-card" novalidate>
       <div class="modal-head">
         <div><p class="path-line">inventory / location editor</p><h3>${location ? "edit location" : "add location"}</h3></div>
         <button type="button" class="icon-button" data-action="close-modal">×</button>
@@ -216,7 +216,7 @@ function openLocationModal(locationId = null) {
       </div>
       <div class="form-actions">
         <button type="button" class="ghost-button" data-action="close-modal">cancel</button>
-        <button type="submit" class="primary-button">save location</button>
+        <button type="button" class="primary-button" data-action="save-location">save location</button>
       </div>
     </form>
   `);
@@ -288,7 +288,15 @@ function addCategoryPrompt() {
 }
 
 function openModal(html) {
-  $("#modalRoot").innerHTML = `<div class="modal-layer">${html}</div>`;
+  const root = $("#modalRoot");
+  root.innerHTML = `<div class="modal-layer">${html}</div>`;
+
+  // Direct guard for dynamically inserted modal forms.
+  // This prevents accidental native GET submits even if global delegation fails.
+  const form = $("form", root);
+  if (form) {
+    form.addEventListener("submit", handleSubmit);
+  }
 }
 
 function closeModal() {
