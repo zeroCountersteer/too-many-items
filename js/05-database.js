@@ -173,7 +173,21 @@ function databaseToInventory(db) {
       updatedAt: metaMap.updatedAt || metaMap.updated_at || new Date().toISOString()
     },
     categories: selectTable(db, "categories", { id: "id", name: "name" }, "ORDER BY \"id\""),
-    locations: selectTable(db, "locations", { id: "id", name: "name", parentId: "parent_id", notes: "notes" }, "ORDER BY \"id\""),
+    locations: selectTable(db, "locations", {
+      id: "id",
+      name: "name",
+      type: "type",
+      parentId: "parent_id",
+      capacity: "capacity",
+      x: "x",
+      y: "y",
+      z: "z",
+      color: "color",
+      ledNode: "led_node",
+      ledIndex: "led_index",
+      networkTarget: "network_target",
+      notes: "notes"
+    }, "ORDER BY \"id\""),
     parts: selectTable(db, "parts", {
       id: "id",
       categoryId: "category_id",
@@ -314,6 +328,7 @@ function inventoryToDatabaseBytes(inventory) {
   runSqlScript(db, SCHEMA_SQL);
   db.run("PRAGMA foreign_keys=OFF");
   db.run("BEGIN TRANSACTION");
+  let committed = false;
   try {
     const meta = {
       app: inv.meta.app || "too-many-items",
@@ -457,8 +472,10 @@ function inventoryToDatabaseBytes(inventory) {
     });
 
     db.run("COMMIT");
+    committed = true;
+    assertForeignKeyIntegrity(db);
   } catch (error) {
-    db.run("ROLLBACK");
+    if (!committed) db.run("ROLLBACK");
     db.close();
     throw error;
   }
@@ -487,6 +504,13 @@ function insertSpecRows(db, inv, kind) {
 
 function runSqlScript(db, script) {
   db.exec(script);
+}
+
+function assertForeignKeyIntegrity(db) {
+  const rows = queryRows(db, "PRAGMA foreign_key_check");
+  if (!rows.length) return;
+  const first = rows[0];
+  throw new Error(`foreign key check failed: ${first.table || "table"} row ${first.rowid || "?"} references ${first.parent || "parent"}`);
 }
 
 function requireSql() {
@@ -527,4 +551,3 @@ function queryRows(db, sql, params = []) {
 function qid(value) {
   return `"${String(value).replaceAll('"', '""')}"`;
 }
-

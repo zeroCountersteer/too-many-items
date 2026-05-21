@@ -9,7 +9,7 @@ function getTheme(id) {
 }
 
 function applyTheme(id) {
-  const theme = getTheme(id) || BUILTIN_THEMES.angelCloud;
+  const theme = getTheme(id) || BUILTIN_THEMES[DEFAULT_THEME_ID];
   state.activeTheme = theme.id;
   localStorage.setItem(STORAGE.activeTheme, theme.id);
   THEME_FIELDS.forEach((key) => {
@@ -20,7 +20,7 @@ function applyTheme(id) {
 }
 
 function updateCustomThemeFromInputs() {
-  const current = getTheme(state.activeTheme) || BUILTIN_THEMES.angelCloud;
+  const current = getTheme(state.activeTheme) || BUILTIN_THEMES[DEFAULT_THEME_ID];
   const customId = current.id.startsWith("custom") ? current.id : "customLocal";
   const custom = state.customThemes[customId] || {
     id: customId,
@@ -39,7 +39,7 @@ function updateCustomThemeFromInputs() {
 }
 
 function exportCurrentTheme() {
-  const theme = getTheme(state.activeTheme) || BUILTIN_THEMES.angelCloud;
+  const theme = getTheme(state.activeTheme) || BUILTIN_THEMES[DEFAULT_THEME_ID];
   downloadText(`${theme.id}.theme.json`, JSON.stringify(theme, null, 2) + "\n", "application/json");
   setStatus("theme exported");
 }
@@ -87,7 +87,7 @@ function resetCustomTheme() {
   if (!confirm("Remove all imported and edited custom themes?")) return;
   state.customThemes = {};
   localStorage.removeItem(STORAGE.customThemes);
-  applyTheme("angelCloud");
+  applyTheme(DEFAULT_THEME_ID);
   setStatus("custom themes reset");
   render();
 }

@@ -3,37 +3,30 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>Inventory v17 // Repository</title>
+  <title>zeroCountersteer Inventory</title>
   <meta name="description" content="Static GitHub-backed SQLite inventory." />
-  <link rel="stylesheet" href="style.css" />
+  <link rel="stylesheet" href="style.css?v=19" />
 </head>
 <body class="no-motion" data-app-ready="false">
-  <div class="ambient" aria-hidden="true">
-    <span class="cloud cloud-a"></span>
-    <span class="cloud cloud-b"></span>
-    <span class="cloud cloud-c"></span>
-    <span class="grid-film"></span>
-  </div>
-
   <div class="app-shell">
     <aside class="navi-card" aria-label="Navigation">
       <div class="navi-head">
         <div>
-          <p class="eyebrow">repository</p>
-          <h1 id="ownerHeader">inventory</h1>
+          <p class="eyebrow">owner</p>
+          <h1 id="ownerHeader">zeroCountersteer</h1>
         </div>
       </div>
 
       <nav class="navi-menu" id="navMenu">
-        <button type="button" class="nav-button" data-view="parts">INVENTORY</button>
-        <button type="button" class="nav-button" data-view="add">ADD</button>
-        <button type="button" class="nav-button" data-view="locations">LOCATIONS</button>
-        <button type="button" class="nav-button" data-view="projects">PROJECTS / BOM</button>
-        <button type="button" class="nav-button" data-view="database">STATS / DB</button>
-        <button type="button" class="nav-button" data-view="settings">SETTINGS</button>
+        <button type="button" class="nav-button" data-view="parts">Inventory</button>
+        <button type="button" class="nav-button" data-view="add">Add</button>
+        <button type="button" class="nav-button" data-view="locations">Locations</button>
+        <button type="button" class="nav-button" data-view="projects">Projects / BOM</button>
+        <button type="button" class="nav-button" data-view="database">Stats / DB</button>
+        <button type="button" class="nav-button" data-view="settings">Settings</button>
       </nav>
 
-      <div class="tiny-panel connection-panel db-status-panel">
+      <div class="panel connection-panel db-status-panel">
         <p class="panel-title">database</p>
         <p id="navDbName">inventory.db</p>
         <p id="navDbState" class="muted">initializing</p>
@@ -47,12 +40,9 @@
           <p class="path-line" id="pathLine">INVENTORY / PARTS</p>
           <h2 id="windowTitle">electronic components</h2>
         </div>
-        <div class="chrome-actions" id="chromeActions"></div>
       </header>
 
       <section class="notice-line" id="noticeLine" hidden></section>
-
-      <section class="metrics-grid" id="metricsGrid" aria-label="Inventory summary"></section>
 
       <section class="content-card" id="viewPanel"></section>
     </main>
@@ -69,14 +59,14 @@
   </noscript>
 
   <script src="https://cdn.jsdelivr.net/npm/sql.js@1.10.3/dist/sql-wasm.js"></script>
-  <script src="js/00-config.js?v=17"></script>
-  <script src="js/06-inventory-model.js?v=17"></script>
-  <script src="js/05-database.js?v=17"></script>
-  <script src="js/07-theme-utils.js?v=17"></script>
-  <script src="js/02-render.js?v=17"></script>
-  <script src="js/04-editors.js?v=17"></script>
-  <script src="js/03-bulk-and-api.js?v=17"></script>
-  <script src="js/01-core-events.js?v=17"></script>
+  <script src="js/00-config.js?v=19"></script>
+  <script src="js/06-inventory-model.js?v=19"></script>
+  <script src="js/05-database.js?v=19"></script>
+  <script src="js/07-theme-utils.js?v=19"></script>
+  <script src="js/02-render.js?v=19"></script>
+  <script src="js/04-editors.js?v=19"></script>
+  <script src="js/03-bulk-and-api.js?v=19"></script>
+  <script src="js/01-core-events.js?v=19"></script>
   <script>if ("serviceWorker" in navigator) { window.addEventListener("load", () => navigator.serviceWorker.register("./sw.js").catch(console.warn)); }</script>
 </body>
 </html>

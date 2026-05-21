@@ -1,17 +1,17 @@
-const CACHE_NAME = "inventory-v17-static";
+const CACHE_NAME = "inventory-v19-static";
 const STATIC_ASSETS = [
   "./",
   "./index.html",
-  "./style.css",
+  "./style.css?v=19",
   "./data/inventory.db",
-  "./js/00-config.js?v=17",
-  "./js/01-core-events.js?v=17",
-  "./js/02-render.js?v=17",
-  "./js/03-bulk-and-api.js?v=17",
-  "./js/04-editors.js?v=17",
-  "./js/05-database.js?v=17",
-  "./js/06-inventory-model.js?v=17",
-  "./js/07-theme-utils.js?v=17"
+  "./js/00-config.js?v=19",
+  "./js/01-core-events.js?v=19",
+  "./js/02-render.js?v=19",
+  "./js/03-bulk-and-api.js?v=19",
+  "./js/04-editors.js?v=19",
+  "./js/05-database.js?v=19",
+  "./js/06-inventory-model.js?v=19",
+  "./js/07-theme-utils.js?v=19"
 ];
 
 self.addEventListener("install", (event) => {

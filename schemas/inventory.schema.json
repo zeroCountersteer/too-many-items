@@ -1,16 +1,9 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://example.invalid/too-many-items/inventory.schema.json",
-  "title": "Too Many Items inventory",
+  "title": "zeroCountersteer inventory snapshot",
   "type": "object",
-  "required": [
-    "schemaVersion",
-    "meta",
-    "categories",
-    "locations",
-    "parts",
-    "stock"
-  ],
+  "required": ["schemaVersion", "meta", "categories", "locations", "parts", "stock"],
   "properties": {
     "schemaVersion": { "type": "integer", "minimum": 1 },
     "meta": {
@@ -18,7 +11,8 @@
       "properties": {
         "app": { "type": "string" },
         "createdAt": { "type": "string" },
-        "updatedAt": { "type": "string" }
+        "updatedAt": { "type": "string" },
+        "source": { "type": ["string", "null"] }
       }
     },
     "categories": {
@@ -40,7 +34,16 @@
         "properties": {
           "id": { "type": "integer" },
           "name": { "type": "string" },
+          "type": { "type": ["string", "null"] },
           "parentId": { "type": ["integer", "null"] },
+          "capacity": { "type": ["number", "null"] },
+          "x": { "type": ["number", "null"] },
+          "y": { "type": ["number", "null"] },
+          "z": { "type": ["number", "null"] },
+          "color": { "type": ["string", "null"] },
+          "ledNode": { "type": ["string", "null"] },
+          "ledIndex": { "type": ["number", "null"] },
+          "networkTarget": { "type": ["string", "null"] },
           "notes": { "type": ["string", "null"] }
         }
       }
@@ -86,11 +89,117 @@
         }
       }
     },
-    "resistorSpecs": { "type": "array" },
-    "capacitorSpecs": { "type": "array" },
-    "inductorSpecs": { "type": "array" },
-    "icSpecs": { "type": "array" },
-    "keyswitchSpecs": { "type": "array" },
-    "attributes": { "type": "array" }
+    "resistorSpecs": { "$ref": "#/$defs/specRows" },
+    "capacitorSpecs": { "$ref": "#/$defs/specRows" },
+    "inductorSpecs": { "$ref": "#/$defs/specRows" },
+    "icSpecs": { "$ref": "#/$defs/specRows" },
+    "keyswitchSpecs": { "$ref": "#/$defs/specRows" },
+    "attributes": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["partId", "name"],
+        "properties": {
+          "partId": { "type": "integer" },
+          "name": { "type": "string" },
+          "valueNum": { "type": ["number", "null"] },
+          "unit": { "type": ["string", "null"] },
+          "valueText": { "type": ["string", "null"] }
+        }
+      }
+    },
+    "projects": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["id", "name"],
+        "properties": {
+          "id": { "type": "integer" },
+          "name": { "type": "string" },
+          "revision": { "type": ["string", "null"] },
+          "sourceFile": { "type": ["string", "null"] },
+          "createdAt": { "type": "string" },
+          "updatedAt": { "type": ["string", "null"] },
+          "notes": { "type": ["string", "null"] }
+        }
+      }
+    },
+    "projectBom": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["id", "projectId", "quantity"],
+        "properties": {
+          "id": { "type": "integer" },
+          "projectId": { "type": "integer" },
+          "partId": { "type": ["integer", "null"] },
+          "value": { "type": ["string", "null"] },
+          "footprint": { "type": ["string", "null"] },
+          "mpn": { "type": ["string", "null"] },
+          "referencesText": { "type": ["string", "null"] },
+          "quantity": { "type": "integer", "minimum": 0 },
+          "fitted": { "type": "integer", "enum": [0, 1] },
+          "notes": { "type": ["string", "null"] }
+        }
+      }
+    },
+    "partAliases": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["id", "partId", "aliasValue"],
+        "properties": {
+          "id": { "type": "integer" },
+          "partId": { "type": "integer" },
+          "aliasType": { "type": ["string", "null"] },
+          "aliasValue": { "type": "string" },
+          "notes": { "type": ["string", "null"] }
+        }
+      }
+    },
+    "projectReservations": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["id", "projectId", "partId", "quantity"],
+        "properties": {
+          "id": { "type": "integer" },
+          "projectId": { "type": "integer" },
+          "partId": { "type": "integer" },
+          "quantity": { "type": "integer", "minimum": 0 },
+          "locationId": { "type": ["integer", "null"] },
+          "createdAt": { "type": "string" },
+          "notes": { "type": ["string", "null"] }
+        }
+      }
+    },
+    "activityLog": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["id", "action"],
+        "properties": {
+          "id": { "type": "integer" },
+          "createdAt": { "type": "string" },
+          "action": { "type": "string" },
+          "entityType": { "type": ["string", "null"] },
+          "entityId": { "type": ["integer", "null"] },
+          "message": { "type": ["string", "null"] }
+        }
+      }
+    }
+  },
+  "$defs": {
+    "specRows": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["partId"],
+        "properties": {
+          "partId": { "type": "integer" }
+        },
+        "additionalProperties": true
+      }
+    }
   }
 }

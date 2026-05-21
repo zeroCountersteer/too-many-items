@@ -283,10 +283,29 @@ function normalizeReferences(inv) {
     if (!categoryIds.has(part.categoryId)) part.categoryId = other.id;
   });
   const partIds = new Set(inv.parts.map((part) => part.id));
+  const locationIds = new Set(inv.locations.map((location) => location.id));
+  const projectIds = new Set(inv.projects.map((project) => project.id));
+
+  inv.locations.forEach((location) => {
+    if (location.parentId !== null && location.parentId !== undefined && !locationIds.has(location.parentId)) location.parentId = null;
+  });
+
   inv.stock = inv.stock.filter((row) => partIds.has(row.partId));
+  inv.stock.forEach((row) => {
+    if (row.locationId !== null && row.locationId !== undefined && !locationIds.has(row.locationId)) row.locationId = null;
+  });
   inv.attributes = inv.attributes.filter((row) => partIds.has(row.partId));
   Object.values(SPEC_CONFIGS).forEach((config) => {
     inv[config.table] = inv[config.table].filter((row) => partIds.has(row.partId));
+  });
+  inv.projectBom = inv.projectBom.filter((row) => projectIds.has(row.projectId));
+  inv.projectBom.forEach((row) => {
+    if (row.partId !== null && row.partId !== undefined && !partIds.has(row.partId)) row.partId = null;
+  });
+  inv.partAliases = inv.partAliases.filter((row) => partIds.has(row.partId));
+  inv.projectReservations = inv.projectReservations.filter((row) => projectIds.has(row.projectId) && partIds.has(row.partId));
+  inv.projectReservations.forEach((row) => {
+    if (row.locationId !== null && row.locationId !== undefined && !locationIds.has(row.locationId)) row.locationId = null;
   });
 }
 
@@ -309,7 +328,7 @@ function normalizeLocations(rows) {
     id: integerOrZero(row.id),
     name: textValue(row.name) || "location",
     type: textValue(row.type) || "bin",
-    parentId: row.parentId ?? row.parent_id ?? null,
+    parentId: nullableNumber(row.parentId ?? row.parent_id),
     capacity: nullableNumber(row.capacity),
     x: nullableNumber(row.x),
     y: nullableNumber(row.y),
@@ -383,6 +402,7 @@ function validateInventory(inv) {
   const categoryIds = new Set(inv.categories.map((category) => category.id));
   const partIds = new Set(inv.parts.map((part) => part.id));
   const locationIds = new Set(inv.locations.map((location) => location.id));
+  const projectIds = new Set((inv.projects || []).map((project) => project.id));
 
   inv.parts.forEach((part) => {
     if (!part.name) errors.push(`part ${part.id} has no name`);
@@ -397,15 +417,51 @@ function validateInventory(inv) {
 
   inv.locations.forEach((location) => {
     if (location.parentId !== null && location.parentId !== undefined && !locationIds.has(location.parentId)) errors.push(`location ${location.id} references missing parent ${location.parentId}`);
+    if (location.parentId === location.id) errors.push(`location ${location.id} cannot be its own parent`);
+  });
+
+  Object.values(SPEC_CONFIGS).forEach((config) => {
+    (inv[config.table] || []).forEach((row) => {
+      if (!partIds.has(row.partId)) errors.push(`${config.table} row references missing part ${row.partId}`);
+    });
+  });
+
+  (inv.attributes || []).forEach((row) => {
+    if (!partIds.has(row.partId)) errors.push(`attribute ${row.name || ""} references missing part ${row.partId}`);
+  });
+
+  (inv.projects || []).forEach((project) => {
+    if (!project.name) errors.push(`project ${project.id} has no name`);
+  });
+
+  (inv.projectBom || []).forEach((row) => {
+    if (!projectIds.has(row.projectId)) errors.push(`BOM row ${row.id} references missing project ${row.projectId}`);
+    if (row.partId !== null && row.partId !== undefined && !partIds.has(row.partId)) errors.push(`BOM row ${row.id} references missing part ${row.partId}`);
+    if (row.quantity < 0) errors.push(`BOM row ${row.id} has negative quantity`);
+  });
+
+  (inv.partAliases || []).forEach((row) => {
+    if (!partIds.has(row.partId)) errors.push(`part alias ${row.id} references missing part ${row.partId}`);
+    if (!row.aliasValue) errors.push(`part alias ${row.id} has no value`);
+  });
+
+  (inv.projectReservations || []).forEach((row) => {
+    if (!projectIds.has(row.projectId)) errors.push(`reservation ${row.id} references missing project ${row.projectId}`);
+    if (!partIds.has(row.partId)) errors.push(`reservation ${row.id} references missing part ${row.partId}`);
+    if (row.locationId !== null && row.locationId !== undefined && !locationIds.has(row.locationId)) errors.push(`reservation ${row.id} references missing location ${row.locationId}`);
+    if (row.quantity < 0) errors.push(`reservation ${row.id} has negative quantity`);
+  });
+
+  (inv.activityLog || []).forEach((row) => {
+    if (!row.action) errors.push(`activity log row ${row.id} has no action`);
   });
 
   return { ok: errors.length === 0, errors };
 }
 
 function touchInventory() {
-  
   invalidateIndexes();
-state.inventory.meta.updatedAt = new Date().toISOString();
+  state.inventory.meta.updatedAt = new Date().toISOString();
 }
 
 function inventoryJson() {
@@ -588,43 +644,6 @@ async function githubRequest(url, token, options = {}) {
 function encodePath(path) {
   return String(path).split("/").map(encodeURIComponent).join("/");
 }
-
-
-
-Object.assign(window, {
-  filteredParts,
-  stockSummary,
-  specSummary,
-  getSpec,
-  categoryKind,
-  getCategoryName,
-  locationPath,
-  getMetrics,
-  createEmptyInventory,
-  normalizeInventory,
-  ensureInventoryShape,
-  normalizeReferences,
-  normalizeCategories,
-  normalizeLocations,
-  normalizeParts,
-  normalizeStock,
-  normalizeSpecs,
-  normalizeAttributes,
-  validateInventory,
-  touchInventory,
-  addOrUpdatePart,
-  deletePart,
-  saveSettingsFromForm,
-  saveExternalApiSettings,
-  loadFromGitHub,
-  commitToGitHub,
-  githubLoadBytes,
-  githubTryGetSha,
-  githubSaveBytes,
-  githubRequest,
-  encodePath
-});
-
 function normalizeProjects(rows) {
   return (rows || []).map((row) => ({
     id: integerOrZero(row.id),
@@ -641,7 +660,7 @@ function normalizeProjectBom(rows) {
   return (rows || []).map((row) => ({
     id: integerOrZero(row.id),
     projectId: integerOrZero(row.projectId ?? row.project_id),
-    partId: row.partId ?? row.part_id ?? null,
+    partId: nullableNumber(row.partId ?? row.part_id),
     value: nullableText(row.value),
     footprint: nullableText(row.footprint),
     mpn: nullableText(row.mpn),
@@ -653,10 +672,23 @@ function normalizeProjectBom(rows) {
 }
 
 function saveVisibleColumns() {
-  const columns = (state.visibleColumns || DEFAULT_PART_COLUMNS).filter((item, index, arr) => PART_COLUMN_DEFS[item] !== undefined && arr.indexOf(item) === index);
-  state.visibleColumns = columns.length ? columns : DEFAULT_PART_COLUMNS.slice();
-  localStorage.setItem(STORAGE.visibleColumns || "tmi.visibleColumns", JSON.stringify(state.visibleColumns));
+  state.visibleColumns = normalizeVisibleColumns(state.visibleColumns);
+  localStorage.setItem(STORAGE.visibleColumns, JSON.stringify(state.visibleColumns));
   setStatus("parts columns updated");
+}
+
+function resetVisibleColumns() {
+  state.visibleColumns = DEFAULT_PART_COLUMNS.slice();
+  localStorage.setItem(STORAGE.visibleColumns, JSON.stringify(state.visibleColumns));
+  setStatus("parts columns reset");
+  renderPartsViewOnly();
+}
+
+function normalizeVisibleColumns(columns) {
+  const source = Array.isArray(columns) && columns.length ? columns : DEFAULT_PART_COLUMNS;
+  const unique = source.filter((item, index, arr) => PART_COLUMN_DEFS[item] !== undefined && arr.indexOf(item) === index && item !== "actions");
+  unique.push("actions");
+  return unique.length > 1 ? unique : DEFAULT_PART_COLUMNS.slice();
 }
 
 function storageStats() {
@@ -740,7 +772,7 @@ function normalizeProjectReservations(rows) {
     projectId: integerOrZero(row.projectId ?? row.project_id),
     partId: integerOrZero(row.partId ?? row.part_id),
     quantity: integerOrZero(row.quantity),
-    locationId: row.locationId ?? row.location_id ?? null,
+    locationId: nullableNumber(row.locationId ?? row.location_id),
     createdAt: row.createdAt || row.created_at || new Date().toISOString(),
     notes: nullableText(row.notes)
   })).filter((row) => row.id > 0 && row.projectId > 0 && row.partId > 0);
@@ -992,3 +1024,67 @@ window.logActivity = logActivity;
 window.invalidateIndexes = invalidateIndexes;
 
 window.rebuildIndexes = rebuildIndexes;
+
+Object.assign(window, {
+  filteredParts,
+  stockSummary,
+  specSummary,
+  primarySpecValue,
+  parseSpecFilterValue,
+  getSpec,
+  categoryKind,
+  getCategoryName,
+  locationPath,
+  getMetrics,
+  createEmptyInventory,
+  normalizeInventory,
+  ensureInventoryShape,
+  normalizeReferences,
+  normalizeCategories,
+  normalizeLocations,
+  normalizeParts,
+  normalizeStock,
+  normalizeSpecs,
+  normalizeAttributes,
+  validateInventory,
+  touchInventory,
+  saveSettings,
+  loadFromGitHub,
+  commitToGitHub,
+  githubLoadBytes,
+  githubTryGetSha,
+  githubSaveBytes,
+  githubRequest,
+  encodePath,
+  normalizeVisibleColumns,
+  saveVisibleColumns,
+  resetVisibleColumns,
+  storageStats,
+  categoryStats,
+  projectStats,
+  highlightLocation,
+  normalizeProjects,
+  normalizeProjectBom,
+  normalizePartAliases,
+  normalizeProjectReservations,
+  normalizeActivityLog,
+  activeProject,
+  projectBomRows,
+  reservationsForProject,
+  availableForPart,
+  bomRowStatus,
+  projectSummary,
+  findBestPartForBomRow,
+  autoMatchProject,
+  selectProject,
+  deleteProject,
+  matchBomRow,
+  unlinkBomRow,
+  deleteBomRow,
+  reserveProjectParts,
+  releaseProjectReservations,
+  applyProjectConsumption,
+  logActivity,
+  invalidateIndexes,
+  rebuildIndexes
+});

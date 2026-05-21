@@ -2,7 +2,11 @@
 
 const SQLJS_CDN = "https://cdn.jsdelivr.net/npm/sql.js@1.10.3/dist/";
 const BUNDLED_DB_PATH = "data/inventory.db";
-const VALID_VIEWS = new Set(["parts", "add", "locations", "database", "settings"]);
+const APP_VERSION = "v19";
+const DEFAULT_THEME_ID = "workbench";
+const DEFAULT_REPO_OWNER = "zeroCountersteer";
+const DEFAULT_REPO_NAME = "too-many-items";
+const VALID_VIEWS = new Set(["parts", "add", "locations", "projects", "database", "settings"]);
 
 const STORAGE = {
   dbBase64: "tmi.v3.database.base64",
@@ -15,7 +19,10 @@ const STORAGE = {
   activeTheme: "tmi.v3.activeTheme",
   customThemes: "tmi.v3.customThemes",
   movingBackground: "tmi.v3.movingBackground",
-  token: "tmi.v3.github.token"
+  token: "tmi.v3.github.token",
+  visibleColumns: "tmi.v3.visibleColumns",
+  activeProjectId: "tmi.v3.activeProjectId",
+  renderLimit: "tmi.v3.renderLimit"
 };
 
 const DEFAULT_CATEGORIES = [
@@ -167,37 +174,42 @@ const THEME_FIELDS = [
   "--font-display"
 ];
 
-const ANGEL_CLOUD_VARIABLES = {
-  "--bg-base": "#dcecff",
-  "--bg-soft": "#f7fbff",
-  "--bg-spot-a": "rgba(151, 205, 255, 0.55)",
-  "--bg-spot-b": "rgba(229, 237, 255, 0.78)",
-  "--bg-lines": "rgba(116, 151, 190, 0.14)",
-  "--panel-bg": "rgba(255, 255, 255, 0.82)",
-  "--panel-bg-strong": "rgba(255, 255, 255, 0.95)",
-  "--panel-muted": "rgba(244, 249, 255, 0.72)",
-  "--panel-border": "rgba(166, 178, 196, 0.68)",
-  "--panel-border-strong": "rgba(134, 153, 180, 0.82)",
-  "--text": "#77859a",
-  "--text-strong": "#5c6f8c",
-  "--text-faint": "#9aa9bb",
-  "--accent": "#8fc9ff",
-  "--accent-2": "#c6b7ff",
-  "--accent-3": "#ff94d4",
-  "--ok": "#59b879",
-  "--danger": "#e35d82",
-  "--warning": "#bf9845",
-  "--shadow": "rgba(79, 98, 124, 0.25)",
-  "--glow": "rgba(143, 201, 255, 0.48)",
-  "--radius-xl": "24px",
-  "--radius-lg": "18px",
-  "--radius-md": "12px",
-  "--radius-sm": "8px",
-  "--font-ui": "\"Trebuchet MS\", \"Segoe UI\", Arial, sans-serif",
-  "--font-mono": "\"Lucida Console\", Monaco, Consolas, monospace",
-  "--font-display": "\"Trebuchet MS\", \"Segoe UI\", Arial, sans-serif"
-};
 const BUILTIN_THEMES = {
+  "workbench": {
+    "id": "workbench",
+    "name": "Workbench",
+    "description": "neutral dense inventory workbench",
+    "variables": {
+      "--bg-base": "#eef1f4",
+      "--bg-soft": "#f8fafc",
+      "--bg-spot-a": "rgba(49, 101, 132, 0.12)",
+      "--bg-spot-b": "rgba(232, 236, 240, 0.9)",
+      "--bg-lines": "rgba(72, 88, 104, 0.12)",
+      "--panel-bg": "#ffffff",
+      "--panel-bg-strong": "#ffffff",
+      "--panel-muted": "#f4f6f8",
+      "--panel-border": "#d5dbe2",
+      "--panel-border-strong": "#aeb8c4",
+      "--text": "#526070",
+      "--text-strong": "#1f2933",
+      "--text-faint": "#7b8794",
+      "--accent": "#246b82",
+      "--accent-2": "#6b7280",
+      "--accent-3": "#b7791f",
+      "--ok": "#2f7d4f",
+      "--danger": "#b4233f",
+      "--warning": "#9a6a17",
+      "--shadow": "rgba(32, 42, 54, 0.12)",
+      "--glow": "rgba(36, 107, 130, 0.14)",
+      "--radius-xl": "8px",
+      "--radius-lg": "8px",
+      "--radius-md": "6px",
+      "--radius-sm": "4px",
+      "--font-ui": "\"Segoe UI\", Arial, sans-serif",
+      "--font-mono": "Consolas, \"Lucida Console\", Monaco, monospace",
+      "--font-display": "\"Segoe UI\", Arial, sans-serif"
+    }
+  },
   "angelCloud": {
     "id": "angelCloud",
     "name": "Angel cloud",
@@ -1788,9 +1800,19 @@ CREATE TABLE IF NOT EXISTS "categories" (
 
 CREATE TABLE IF NOT EXISTS "locations" (
   "id" INTEGER PRIMARY KEY,
-  "name" TEXT NOT NULL UNIQUE,
+  "name" TEXT NOT NULL,
+  "type" TEXT DEFAULT 'bin',
   "parent_id" INTEGER,
+  "capacity" INTEGER,
+  "x" INTEGER,
+  "y" INTEGER,
+  "z" INTEGER,
+  "color" TEXT,
+  "led_node" TEXT,
+  "led_index" INTEGER,
+  "network_target" TEXT,
   "notes" TEXT,
+  UNIQUE("parent_id", "name"),
   FOREIGN KEY("parent_id") REFERENCES "locations"("id")
 );
 
@@ -1914,6 +1936,76 @@ LEFT JOIN (
   LEFT JOIN "locations" l ON l."id" = s."location_id"
   GROUP BY s."part_id"
 ) st ON st."part_id" = p."id";
+
+
+CREATE TABLE IF NOT EXISTS "projects" (
+  "id" INTEGER PRIMARY KEY,
+  "name" TEXT NOT NULL,
+  "revision" TEXT,
+  "source_file" TEXT,
+  "created_at" TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  "updated_at" TEXT,
+  "notes" TEXT
+);
+
+CREATE TABLE IF NOT EXISTS "project_bom" (
+  "id" INTEGER PRIMARY KEY,
+  "project_id" INTEGER NOT NULL,
+  "part_id" INTEGER,
+  "value" TEXT,
+  "footprint" TEXT,
+  "mpn" TEXT,
+  "references_text" TEXT,
+  "quantity" INTEGER NOT NULL DEFAULT 0,
+  "fitted" INTEGER DEFAULT 1 CHECK("fitted" IN (0, 1)),
+  "notes" TEXT,
+  FOREIGN KEY("project_id") REFERENCES "projects"("id") ON DELETE CASCADE,
+  FOREIGN KEY("part_id") REFERENCES "parts"("id") ON DELETE SET NULL
+);
+
+CREATE INDEX IF NOT EXISTS "idx_locations_parent" ON "locations" ("parent_id");
+CREATE INDEX IF NOT EXISTS "idx_locations_type" ON "locations" ("type");
+CREATE INDEX IF NOT EXISTS "idx_project_bom_project" ON "project_bom" ("project_id");
+CREATE INDEX IF NOT EXISTS "idx_project_bom_part" ON "project_bom" ("part_id");
+
+
+CREATE TABLE IF NOT EXISTS "part_aliases" (
+  "id" INTEGER PRIMARY KEY,
+  "part_id" INTEGER NOT NULL,
+  "alias_type" TEXT,
+  "alias_value" TEXT NOT NULL,
+  "notes" TEXT,
+  UNIQUE("alias_type", "alias_value"),
+  FOREIGN KEY("part_id") REFERENCES "parts"("id") ON DELETE CASCADE
+);
+
+CREATE TABLE IF NOT EXISTS "project_reservations" (
+  "id" INTEGER PRIMARY KEY,
+  "project_id" INTEGER NOT NULL,
+  "part_id" INTEGER NOT NULL,
+  "quantity" INTEGER NOT NULL DEFAULT 0,
+  "location_id" INTEGER,
+  "created_at" TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  "notes" TEXT,
+  FOREIGN KEY("project_id") REFERENCES "projects"("id") ON DELETE CASCADE,
+  FOREIGN KEY("part_id") REFERENCES "parts"("id") ON DELETE CASCADE,
+  FOREIGN KEY("location_id") REFERENCES "locations"("id") ON DELETE SET NULL
+);
+
+CREATE TABLE IF NOT EXISTS "activity_log" (
+  "id" INTEGER PRIMARY KEY,
+  "created_at" TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  "action" TEXT NOT NULL,
+  "entity_type" TEXT,
+  "entity_id" INTEGER,
+  "message" TEXT
+);
+
+CREATE INDEX IF NOT EXISTS "idx_part_aliases_part" ON "part_aliases" ("part_id");
+CREATE INDEX IF NOT EXISTS "idx_part_aliases_value" ON "part_aliases" ("alias_value");
+CREATE INDEX IF NOT EXISTS "idx_project_reservations_project" ON "project_reservations" ("project_id");
+CREATE INDEX IF NOT EXISTS "idx_project_reservations_part" ON "project_reservations" ("part_id");
+CREATE INDEX IF NOT EXISTS "idx_activity_log_created" ON "activity_log" ("created_at");
 `;
 
 

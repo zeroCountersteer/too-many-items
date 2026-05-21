@@ -185,6 +185,14 @@ function deletePart(partId) {
   state.inventory.parts = state.inventory.parts.filter((item) => item.id !== partId);
   state.inventory.stock = state.inventory.stock.filter((row) => row.partId !== partId);
   state.inventory.attributes = state.inventory.attributes.filter((attr) => attr.partId !== partId);
+  state.inventory.partAliases = (state.inventory.partAliases || []).filter((alias) => alias.partId !== partId);
+  state.inventory.projectReservations = (state.inventory.projectReservations || []).filter((row) => row.partId !== partId);
+  (state.inventory.projectBom || []).forEach((row) => {
+    if (row.partId === partId) {
+      row.partId = null;
+      row.notes = row.notes || "unresolved: matched part was deleted";
+    }
+  });
   Object.values(SPEC_CONFIGS).forEach((config) => {
     state.inventory[config.table] = state.inventory[config.table].filter((spec) => spec.partId !== partId);
   });
@@ -261,6 +269,10 @@ function saveLocationFromForm(form) {
     toast("location cannot be its own parent", "error");
     return;
   }
+  if (location.parentId && isDescendantLocation(location.parentId, id)) {
+    toast("location cannot use its own child as parent", "error");
+    return;
+  }
 
   if (existing) Object.assign(existing, location);
   else state.inventory.locations.push(location);
@@ -269,6 +281,18 @@ function saveLocationFromForm(form) {
   if (!persistDatabase(existing ? "location updated" : "location added", { dirty: true })) return;
   closeModal();
   render();
+}
+
+function isDescendantLocation(candidateParentId, locationId) {
+  let current = state.inventory.locations.find((item) => item.id === Number(candidateParentId));
+  const visited = new Set();
+  while (current) {
+    if (current.id === Number(locationId)) return true;
+    if (!current.parentId || visited.has(current.id)) return false;
+    visited.add(current.id);
+    current = state.inventory.locations.find((item) => item.id === Number(current.parentId));
+  }
+  return false;
 }
 
 function deleteLocation(locationId) {
@@ -373,4 +397,3 @@ function saveBomRowFromForm(form) {
   closeModal();
   render();
 }
-

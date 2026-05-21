@@ -81,7 +81,7 @@ function parseBulkImportForm(form) {
     }
     const data = header ? rowFromHeader(cells, header) : rowFromPositional(cells, kind);
     try {
-      const built = buildBulkRow({ data, kind, defaultPackage, defaultFootprint, defaultQuantity, defaultMin, defaultSource, defaultTolerance, defaultPower, defaultVoltage, defaultDielectric, defaultCurrent, defaultLocationId, defaultDielectric, defaultCurrent, now });
+      const built = buildBulkRow({ data, kind, defaultPackage, defaultFootprint, defaultQuantity, defaultMin, defaultSource, defaultTolerance, defaultPower, defaultVoltage, defaultDielectric, defaultCurrent, defaultLocationId, now });
       rows.push(built);
     } catch (error) {
       errors.push(`${line}: ${error.message}`);
@@ -272,7 +272,7 @@ function ensureLocationByPath(name) {
   if (!clean) return null;
   const existing = state.inventory.locations.find((location) => locationPath(location.id).toLowerCase() === clean.toLowerCase() || location.name.toLowerCase() === clean.toLowerCase());
   if (existing) return existing.id;
-  const location = { id: nextId(state.inventory.locations), name: clean, parentId: null, notes: null };
+  const location = { id: nextId(state.inventory.locations), name: clean, type: "bin", parentId: null, capacity: null, x: null, y: null, z: null, color: null, ledNode: null, ledIndex: null, networkTarget: null, notes: null };
   state.inventory.locations.push(location);
   return location.id;
 }
@@ -285,7 +285,7 @@ function firstFilled(...values) {
 }
 
 function parseResistance(value) {
-  const raw = textValue(value).replace(/Ω|ohms?|ом/gi, "").replace(",", ".");
+  const raw = textValue(value).replace(/\u03a9|ohms?|\u043e\u043c/gi, "").replace(",", ".");
   if (!raw) return null;
   const rNotation = raw.match(/^(\d+(?:\.\d+)?)([rRkKmM])(\d+)$/);
   if (rNotation) {
@@ -305,8 +305,8 @@ function parseResistance(value) {
 
 function parseEngineeringNumber(input, units, defaultUnit = "") {
   const text = textValue(input)
-    .replace("µ", "u")
-    .replace("μ", "u")
+    .replace("\u00b5", "u")
+    .replace("\u03bc", "u")
     .replace(",", ".")
     .trim()
     .toUpperCase();
@@ -528,7 +528,9 @@ function importKiCadBomFromForm() {
   touchInventory();
   if (!persistDatabase("KiCad BOM imported", { dirty: true })) return;
   toast(`project BOM stored: ${project.name}`);
-  setView("database");
+  state.activeProjectId = projectId;
+  localStorage.setItem(STORAGE.activeProjectId, String(projectId));
+  setView("projects");
 }
 
 function parseCsvTable(text) {
@@ -568,4 +570,3 @@ function findPartForBom(row) {
       (!fp || String(part.footprint || part.package || "").toLowerCase().includes(fp));
   }) || null;
 }
-

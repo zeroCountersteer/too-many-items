@@ -1,12 +1,54 @@
-# too-many-items
+# zeroCountersteer Inventory
 
-todo:
-- fix background gradient, there is a stray bar at top
-- remove scrolling for page, only card inside page should be scrollable. Page should look good on all display, agnostic of their ppi and resolution
-- add sorting and filtering by category specific specs for example resistance
-- in database menu there should be comprehensive statictics with graphs, bars, etc
-- remove NAVI references and TOO MANY ITEMS references, as a header use repo owners name
-- add comprehensive locations editor to make different kind of storage spaces available. For example i can have individual drawers for components at home, bulk boxes at work etc. This functionality will be reused in LED aided storage solutions, like highlighting drawer with a pcb that is connected to network via some kind of api.
-- Bulk add should be more flexible. I may need to add a lot of items with equal quantity or not. Maybe use it as single line editor with an add button under previous item which copies values from previous entry. And configurable bulk adder, i may need to add e96, e24 or other set of values with similar specs other than resistance/capacitance/etc
-- also add support for importing kicad default BOM template generated csv files to generate project and adding/removing items needed for that project and redacting BOM after importing. They should be stored in repo, not imported every session.
-- make parts page configurable, i may not need to see ID, location or anything else
+Static, GitHub-backed electronics inventory for parts, storage locations, and project BOM planning.
+
+The app runs entirely in the browser. The canonical inventory data is the committed SQLite file at `data/inventory.db`; JSON is available only as a snapshot import/export format.
+
+## Workflows
+
+- **Inventory:** add or edit parts, stock rows, package/footprint data, manufacturer/MPN, notes, and category-specific specs.
+- **Bulk add:** enter spreadsheet-style rows, clone row patterns, generate E-series resistor sets, preview rows, then merge or import into the SQLite inventory.
+- **Locations:** model rooms, worksites, cabinets, drawers, bins, boxes, shelves, and LED-aware storage nodes with hierarchy, capacity, coordinates, color, and highlight target metadata.
+- **Projects / BOM:** paste a KiCad default BOM CSV to create a stored project, auto-match rows against known parts, manually edit/unlink/delete rows, reserve available stock, release reservations, or consume reserved stock.
+- **Stats / DB:** inspect stock totals, category distribution, storage occupancy, project counts, validation health, and local database state.
+- **Settings / Sync:** set GitHub owner/repo/branch/path and a session-only fine-grained token with Contents read/write permission, then load or commit `inventory.db`.
+
+## Data Model
+
+The SQLite schema lives in `schemas/inventory.sql` and is embedded in `js/00-config.js` for browser-side database export. The JSON snapshot schema lives in `schemas/inventory.schema.json`.
+
+Core tables:
+
+- `categories`, `parts`, `stock`, component spec tables, and free-form `attributes`
+- hierarchical `locations` with optional storage/LED metadata
+- `projects`, `project_bom`, `part_aliases`, `project_reservations`, and `activity_log`
+
+## Local QA
+
+Install dev tooling once:
+
+```sh
+npm install
+```
+
+Run static checks:
+
+```sh
+npm run check
+```
+
+Run the app locally:
+
+```sh
+npm run serve
+```
+
+Run browser smoke tests:
+
+```sh
+npm run test:smoke
+```
+
+## Deployment
+
+This repo is deployable as static files, including GitHub Pages. Keep `data/inventory.db`, `index.html`, `style.css`, `sw.js`, `js/`, `schemas/`, and `themes/` committed. After app code changes, bump the script query string and service-worker cache version together.

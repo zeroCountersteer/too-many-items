@@ -21,13 +21,13 @@ const state = {
   sortDir: "asc",
   githubSha: localStorage.getItem(STORAGE.githubSha) || "",
   githubConfig: loadJsonFromStorage(STORAGE.githubConfig, {
-    owner: "",
-    repo: "",
+    owner: DEFAULT_REPO_OWNER,
+    repo: DEFAULT_REPO_NAME,
     branch: "main",
     path: BUNDLED_DB_PATH
   }),
   customThemes: loadJsonFromStorage(STORAGE.customThemes, {}),
-  activeTheme: localStorage.getItem(STORAGE.activeTheme) || "angelCloud",
+  activeTheme: localStorage.getItem(STORAGE.activeTheme) || DEFAULT_THEME_ID,
   movingBackground: localStorage.getItem(STORAGE.movingBackground) !== "off",
   dbSource: localStorage.getItem(STORAGE.dbSource) || "not loaded",
   dbFileName: "inventory.db",
@@ -121,6 +121,9 @@ function handleClick(event) {
       break;
     case "save-columns":
       saveVisibleColumns();
+      break;
+    case "reset-columns":
+      resetVisibleColumns();
       break;
     case "highlight-location":
       highlightLocation(id);
@@ -458,7 +461,7 @@ function csvCell(value) {
 async function copyDebugSnapshot() {
   const metrics = getMetrics();
   const snapshot = {
-    version: "v17",
+    version: APP_VERSION,
     dbSource: state.dbSource,
     dbDirty: state.dbDirty,
     activeView: state.activeView,
