@@ -65,15 +65,37 @@ try {
   await page.click('[data-action="open-add-part"]');
   await page.fill('#partForm [name="name"]', "Smoke 10k resistor");
   await page.fill('#partForm [name="package"]', "0603");
+  await page.fill('#partForm [name="footprint"]', "R_0603_1608Metric");
   await page.fill('#partForm [name="stock.quantity"]', "5");
   await page.click('#partForm [data-action="save-part"]');
   await page.waitForSelector("#partForm", { state: "detached", timeout: 10000 });
   await page.fill("[data-search]", "Smoke 10k resistor");
   await page.waitForTimeout(250);
   if (!await page.locator("text=Smoke 10k resistor").count()) throw new Error("Part create flow did not render the new part.");
+
+  await page.check('[data-part-select]');
+  await page.fill("#bulkUnitPrice", "0.015");
+  await page.fill("#bulkCurrency", "USD");
+  await page.click('[data-action="bulk-set-price"]');
+  await page.waitForTimeout(250);
+  await page.selectOption("#bulkToLocation", { label: "Smoke drawer" });
+  await page.click('[data-action="preview-bulk-move"]');
+  if (!await page.locator("#bulkOperationPreview", { hasText: "Smoke drawer" }).count()) throw new Error("Bulk move preview did not show destination.");
+  await page.click('[data-action="apply-bulk-move"]');
+  await page.waitForTimeout(250);
+  const movedLocationText = await page.textContent(".compact-parts-table");
+  if (!movedLocationText?.includes("Smoke drawer")) throw new Error("Bulk move did not update the part location.");
+  await page.fill("#bulkTakeQty", "1");
+  await page.click('[data-action="bulk-take"]');
+  await page.waitForTimeout(250);
+  const postTakeText = await page.textContent(".compact-parts-table");
+  if (!postTakeText?.includes("4")) throw new Error("Bulk take did not decrement visible stock.");
+
   await page.click('[data-action="open-edit-part"]');
-  page.once("dialog", (dialog) => dialog.accept());
-  await page.click('#partForm [data-action="delete-part"]');
+  await page.waitForSelector("#partForm", { timeout: 10000 });
+  const priceValue = await page.inputValue('#partForm [name="stock.unitPrice"]');
+  if (Number(priceValue) !== 0.015) throw new Error("Part drawer did not expose stock lot price editing.");
+  await page.locator('#partForm [data-action="close-modal"]').first().click();
   await page.waitForSelector("#partForm", { state: "detached", timeout: 10000 });
 
   await page.click('[data-view="add"]');
@@ -84,9 +106,14 @@ try {
     '"1","R1 R2","R_0603_1608Metric","2","10k",""',
     '"2","C1","C_0603_1608Metric","1","100nF",""'
   ].join("\n"));
+  await page.click('#kicadBomForm [data-action="preview-bom-import"]');
+  if (!await page.locator("#bomPreview", { hasText: "R1 R2" }).count()) throw new Error("Generic BOM preview did not render parsed rows.");
   await page.click('#kicadBomForm [data-action="import-kicad-bom"]');
   await page.waitForFunction(() => document.querySelector('[data-view="projects"]')?.classList.contains("active"), { timeout: 10000 });
-  if (!await page.locator("text=Smoke Board").count()) throw new Error("KiCad BOM import did not route to Projects.");
+  if (!await page.locator("text=Smoke Board").count()) throw new Error("BOM import did not route to Projects.");
+  const projectText = await page.textContent(".project-detail");
+  if (!projectText?.includes("BOM total")) throw new Error("Project cost summary did not render.");
+  if (!projectText?.includes("USD")) throw new Error("Project cost summary did not use the default currency.");
 
   await page.click('[data-view="database"]');
   await page.waitForFunction(() => document.querySelector('[data-view="database"]')?.classList.contains("active"), { timeout: 10000 });

@@ -488,72 +488,194 @@ function importKiCadBomFromForm() {
     toast("BOM CSV is empty", "error");
     return;
   }
-  const rows = parseCsvTable(csv);
-  if (!rows.length) {
+  const parsed = parseBomTable(csv);
+  if (!parsed.rows.length) {
     toast("no BOM rows parsed", "error");
+    previewBomImport();
     return;
   }
-  const projectId = nextId(state.inventory.projects || []);
+  const mode = textValue(fd.get("projectMode")) || "create";
+  const existingProjectId = nullableNumber(fd.get("existingProjectId"));
   const now = new Date().toISOString();
-  const project = {
-    id: projectId,
-    name: textValue(fd.get("projectName")) || "KiCad project",
-    revision: nullableText(fd.get("revision")),
-    sourceFile: "pasted KiCad BOM",
-    createdAt: now,
-    updatedAt: now,
-    notes: null
-  };
   state.inventory.projects = state.inventory.projects || [];
   state.inventory.projectBom = state.inventory.projectBom || [];
-  state.inventory.projects.push(project);
-  rows.forEach((row) => {
-    const normalized = normalizeBomRow(row);
+  let project;
+  if (mode === "update" && existingProjectId) {
+    project = state.inventory.projects.find((item) => item.id === existingProjectId);
+    if (!project) {
+      toast("choose a project to update", "error");
+      return;
+    }
+    project.name = textValue(fd.get("projectName")) || project.name;
+    project.revision = nullableText(fd.get("revision")) || project.revision;
+    project.updatedAt = now;
+    project.sourceFile = "pasted BOM update";
+    state.inventory.projectBom = state.inventory.projectBom.filter((row) => row.projectId !== project.id);
+    state.inventory.projectReservations = (state.inventory.projectReservations || []).filter((row) => row.projectId !== project.id);
+  } else {
+    project = {
+      id: nextId(state.inventory.projects || []),
+      name: textValue(fd.get("projectName")) || "Imported project",
+      revision: nullableText(fd.get("revision")),
+      sourceFile: `pasted ${parsed.delimiter === "\t" ? "TSV" : "CSV"} BOM`,
+      createdAt: now,
+      updatedAt: now,
+      notes: null
+    };
+    state.inventory.projects.push(project);
+  }
+
+  parsed.rows.forEach((normalized) => {
     const match = findPartForBom(normalized) || findBestPartForBomRow(normalized);
     state.inventory.projectBom.push({
       id: nextId(state.inventory.projectBom),
-      projectId,
+      projectId: project.id,
       partId: match?.id || null,
       value: normalized.value,
       footprint: normalized.footprint,
       mpn: normalized.mpn,
       referencesText: normalized.references,
       quantity: normalized.quantity,
-      fitted: 1,
-      notes: match ? null : "unresolved"
+      fitted: normalized.fitted,
+      notes: [match ? null : "unresolved", normalized.notes, normalized.unitPrice ? `import unit price ${normalized.unitPrice}${normalized.currency ? ` ${normalized.currency}` : ""}` : null].filter(Boolean).join("; ") || null
     });
   });
-  const auto = autoMatchProject(projectId);
-  logActivity("import-kicad-bom", "project", projectId, `${rows.length} rows, ${auto} auto-matched`);
+  const auto = autoMatchProject(project.id);
+  logActivity(mode === "update" ? "update-project-bom" : "import-project-bom", "project", project.id, `${parsed.rows.length} rows, ${auto} auto-matched`);
   touchInventory();
-  if (!persistDatabase("KiCad BOM imported", { dirty: true })) return;
+  if (!persistDatabase("project BOM imported", { dirty: true })) return;
   toast(`project BOM stored: ${project.name}`);
-  state.activeProjectId = projectId;
-  localStorage.setItem(STORAGE.activeProjectId, String(projectId));
+  state.activeProjectId = project.id;
+  localStorage.setItem(STORAGE.activeProjectId, String(project.id));
   setView("projects");
 }
 
+function previewBomImport() {
+  const form = $("#kicadBomForm");
+  const target = $("#bomPreview");
+  if (!form || !target) return;
+  const parsed = parseBomTable(new FormData(form).get("bomCsv"));
+  if (!parsed.rows.length) {
+    target.innerHTML = `<div class="empty-panel compact"><h3>nothing parsed</h3><p>${escapeHtml(parsed.errors[0] || "Paste CSV or TSV rows.")}</p></div>`;
+    return;
+  }
+  const rows = parsed.rows.slice(0, 40).map((row) => {
+    const match = findPartForBom(row) || findBestPartForBomRow(row);
+    return `<tr><td>${escapeHtml(row.references || "")}</td><td>${row.quantity}</td><td>${escapeHtml(row.value || "")}</td><td>${escapeHtml(row.footprint || "")}</td><td>${escapeHtml(row.mpn || "")}</td><td>${row.fitted ? "yes" : "DNP"}</td><td>${match ? escapeHtml(match.name) : `<span class="danger-text">unresolved</span>`}</td></tr>`;
+  }).join("");
+  target.innerHTML = `
+    <p class="section-title">preview / ${parsed.rows.length} rows / delimiter ${parsed.delimiter === "\t" ? "tab" : escapeHtml(parsed.delimiter)}</p>
+    ${parsed.errors.length ? `<p class="small-note danger-text">${escapeHtml(parsed.errors.slice(0, 3).join(" / "))}</p>` : ""}
+    <div class="table-wrap compact-table"><table class="data-table"><thead><tr><th>Refs</th><th>Qty</th><th>Value</th><th>Footprint</th><th>MPN</th><th>Fitted</th><th>Auto match</th></tr></thead><tbody>${rows}</tbody></table></div>`;
+}
+
 function parseCsvTable(text) {
-  const lines = text.split(/\r?\n/).filter((line) => line.trim());
-  if (!lines.length) return [];
-  const header = parseSimpleCsvLine(lines[0], lines[0].includes(";") ? ";" : ",").map(normalizeHeaderName);
-  return lines.slice(1).map((line) => {
-    const cells = parseSimpleCsvLine(line, line.includes(";") ? ";" : ",");
-    const obj = {};
-    header.forEach((name, i) => obj[headerAlias(name)] = cells[i] || "");
-    return obj;
+  return parseBomTable(text).rows.map((row) => ({
+    references: row.references,
+    quantity: row.quantity,
+    value: row.value,
+    footprint: row.footprint,
+    mpn: row.mpn,
+    fitted: row.fitted,
+    notes: row.notes
+  }));
+}
+
+function parseBomTable(text) {
+  const lines = String(text || "").split(/\r?\n/).filter((line) => line.trim());
+  if (!lines.length) return { rows: [], delimiter: ",", errors: ["BOM text is empty"] };
+  const delimiter = detectTableDelimiter(lines);
+  const first = parseSimpleCsvLine(lines[0], delimiter);
+  const hasHeader = looksLikeBomHeader(first);
+  const header = hasHeader ? first.map(normalizeHeaderName).map(bomHeaderAlias) : ["references", "quantity", "value", "footprint", "mpn", "manufacturer", "notes"];
+  const dataLines = hasHeader ? lines.slice(1) : lines;
+  const errors = [];
+  const rows = [];
+  dataLines.forEach((line, index) => {
+    const cells = parseSimpleCsvLine(line, delimiter);
+    const raw = {};
+    header.forEach((name, i) => raw[name] = cells[i] || "");
+    const normalized = normalizeBomRow(raw);
+    if (!normalized.references && !normalized.value && !normalized.mpn) {
+      errors.push(`row ${index + 1}: missing refs/value/mpn`);
+      return;
+    }
+    rows.push(normalized);
   });
+  return { rows, delimiter, errors };
+}
+
+function detectTableDelimiter(lines) {
+  const candidates = ["\t", ",", ";"];
+  let best = ",";
+  let bestScore = -1;
+  candidates.forEach((delimiter) => {
+    const counts = lines.slice(0, 5).map((line) => parseSimpleCsvLine(line, delimiter).length);
+    const score = counts.reduce((sum, count) => sum + (count > 1 ? count : 0), 0) - new Set(counts).size;
+    if (score > bestScore) {
+      bestScore = score;
+      best = delimiter;
+    }
+  });
+  return best;
+}
+
+function looksLikeBomHeader(cells) {
+  const names = cells.map((cell) => bomHeaderAlias(normalizeHeaderName(cell)));
+  return names.some((name) => ["references", "quantity", "value", "footprint", "mpn", "manufacturer", "fitted", "dnp", "unitPrice"].includes(name));
+}
+
+function bomHeaderAlias(name) {
+  const aliases = {
+    ref: "references",
+    refs: "references",
+    refdes: "references",
+    reference: "references",
+    references_text: "references",
+    designator: "references",
+    designators: "references",
+    qty: "quantity",
+    count: "quantity",
+    designation: "value",
+    description: "value",
+    package: "footprint",
+    pkg: "footprint",
+    part_number: "mpn",
+    partnumber: "mpn",
+    manufacturer_part_number: "mpn",
+    mfg_part_number: "mpn",
+    manf_num: "mpn",
+    supplier_and_ref: "mpn",
+    supplier_ref: "mpn",
+    mfr: "manufacturer",
+    fitted: "fitted",
+    populate: "fitted",
+    populated: "fitted",
+    dnp: "dnp",
+    do_not_populate: "dnp",
+    unit_price: "unitPrice",
+    price: "unitPrice"
+  };
+  return aliases[name] || headerAlias(name);
 }
 
 function normalizeBomRow(row) {
   const references = row.references || row.designator || row.ref || row.refs || "";
   const refs = String(references).split(/[,\s]+/).filter(Boolean);
+  const dnpText = String(row.dnp || "").trim().toLowerCase();
+  const fittedText = String(row.fitted || "").trim().toLowerCase();
+  const isDnp = ["1", "yes", "true", "dnp", "dnf"].includes(dnpText) || ["0", "no", "false", "dnp", "dnf"].includes(fittedText);
   return {
     value: nullableText(row.value || row.designation || row.name),
     footprint: nullableText(row.footprint || row.package),
     mpn: nullableText(row.mpn || row.part_number || row.supplier_and_ref),
+    manufacturer: nullableText(row.manufacturer),
     references: nullableText(references),
-    quantity: integerOrZero(row.quantity || row.qty || refs.length || 1)
+    quantity: integerOrZero(row.quantity || row.qty || refs.length || 1),
+    fitted: isDnp ? 0 : 1,
+    notes: nullableText(row.notes),
+    unitPrice: nullableNumber(row.unitPrice ?? row.unit_price ?? row.price),
+    currency: row.currency ? normalizeCurrency(row.currency) : null
   };
 }
 

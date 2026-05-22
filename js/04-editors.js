@@ -8,13 +8,15 @@ function openPartModal(partId = null, prefill = null) {
   const categoryName = getCategoryName(categoryId);
   const stockRows = part ? state.inventory.stock.filter((row) => row.partId === part.id) : [];
   const rowHtml = stockRows.length ? stockRows.map(renderStockEditorRow).join("") : renderStockEditorRow(null);
+  const aliasRows = part ? (state.inventory.partAliases || []).filter((row) => row.partId === part.id) : [];
+  const aliasHtml = aliasRows.length ? aliasRows.map(renderAliasEditorRow).join("") : renderAliasEditorRow(null);
   const categoryOptions = state.inventory.categories.map((category) => `<option value="${category.id}" ${category.id === categoryId ? "selected" : ""}>${escapeHtml(category.name)}</option>`).join("");
 
-  openModal(`
-    <form id="partForm" class="modal-card" novalidate>
-      <div class="modal-head">
+  openDrawer(`
+    <form id="partForm" class="drawer-card" novalidate>
+      <div class="drawer-head">
         <div><p class="path-line">inventory / part editor</p><h3>${title}</h3></div>
-        <button type="button" class="icon-button" data-action="close-modal">×</button>
+        <button type="button" class="icon-button" data-action="close-modal">x</button>
       </div>
       <input type="hidden" name="id" value="${part ? part.id : ""}" />
       <div class="form-grid">
@@ -35,6 +37,10 @@ function openPartModal(partId = null, prefill = null) {
       <p class="section-title">stock</p>
       <div class="stock-editor" id="stockRows">${rowHtml}</div>
       <button type="button" class="ghost-button" data-action="add-stock-row">+ stock row</button>
+
+      <p class="section-title">aliases</p>
+      <div class="alias-editor" id="aliasRows">${aliasHtml}</div>
+      <button type="button" class="ghost-button" data-action="add-alias-row">+ alias</button>
 
       <div class="form-actions">
         ${part ? `<button type="button" class="danger-button" data-action="delete-part" data-id="${part.id}">delete</button>` : ""}
@@ -64,17 +70,39 @@ function renderStockEditorRow(row) {
   ).join("");
 
   return `<div class="stock-row-edit">
+    <input type="hidden" name="stock.id" value="${escapeAttr(row?.id || "")}" />
     <div class="field"><label>location</label><select name="stock.locationId">${locations}</select></div>
     <div class="field"><label>quantity</label><input name="stock.quantity" type="number" min="0" step="1" value="${escapeAttr(row?.quantity ?? "")}" /></div>
     <div class="field"><label>min</label><input name="stock.minQuantity" type="number" min="0" step="1" value="${escapeAttr(row?.minQuantity ?? "")}" /></div>
     <div class="field"><label>source</label><input name="stock.source" value="${escapeAttr(row?.source || "")}" placeholder="LCSC, AliExpress..." /></div>
-    <button type="button" class="icon-button" data-action="remove-stock-row">×</button>
+    <div class="field"><label>order</label><input name="stock.orderNumber" value="${escapeAttr(row?.orderNumber || "")}" placeholder="PO, order #, reel" /></div>
+    <div class="field"><label>unit price</label><input name="stock.unitPrice" type="number" min="0" step="0.0001" value="${escapeAttr(row?.unitPrice ?? "")}" /></div>
+    <div class="field"><label>currency</label><input name="stock.currency" value="${escapeAttr(row?.currency || defaultCurrency())}" /></div>
+    <div class="field"><label>date</label><input name="stock.dateAdded" type="date" value="${escapeAttr(row?.dateAdded || new Date().toISOString().slice(0, 10))}" /></div>
+    <div class="field span-2"><label>lot notes</label><input name="stock.notes" value="${escapeAttr(row?.notes || "")}" /></div>
+    ${row?.id ? `<button type="button" data-action="take-stock-row" data-id="${row.id}">take lot</button>` : ""}
+    <button type="button" class="icon-button" data-action="remove-stock-row">x</button>
   </div>`;
 }
 
 function addStockEditorRow() {
   const container = $("#stockRows");
   if (container) container.insertAdjacentHTML("beforeend", renderStockEditorRow(null));
+}
+
+function renderAliasEditorRow(row) {
+  return `<div class="alias-row-edit">
+    <input type="hidden" name="alias.id" value="${escapeAttr(row?.id || "")}" />
+    <div class="field"><label>type</label><input name="alias.aliasType" value="${escapeAttr(row?.aliasType || "mpn")}" placeholder="mpn, vendor, search" /></div>
+    <div class="field"><label>value</label><input name="alias.aliasValue" value="${escapeAttr(row?.aliasValue || "")}" placeholder="alternate part number" /></div>
+    <div class="field"><label>notes</label><input name="alias.notes" value="${escapeAttr(row?.notes || "")}" /></div>
+    <button type="button" class="icon-button" data-action="remove-alias-row">x</button>
+  </div>`;
+}
+
+function addAliasEditorRow() {
+  const container = $("#aliasRows");
+  if (container) container.insertAdjacentHTML("beforeend", renderAliasEditorRow(null));
 }
 
 function savePartFromForm(form) {
@@ -121,6 +149,7 @@ function savePartFromForm(form) {
 
   updateSpecsFromForm(form, part);
   updateStockFromForm(form, part.id);
+  updateAliasesFromForm(form, part.id);
   touchInventory();
   if (!persistDatabase(existing ? "part updated" : "part added", { dirty: true })) return;
   closeModal();
@@ -152,30 +181,84 @@ function updateSpecsFromForm(form, part) {
 }
 
 function updateStockFromForm(form, partId) {
+  const previousRows = state.inventory.stock.filter((row) => row.partId === partId);
+  const previousById = new Map(previousRows.map((row) => [Number(row.id), row]));
   state.inventory.stock = state.inventory.stock.filter((row) => row.partId !== partId);
   const rows = $$(".stock-row-edit", form);
   const today = new Date().toISOString().slice(0, 10);
+  const nextRows = [];
   rows.forEach((row) => {
+    const rowId = nullableNumber($("[name='stock.id']", row)?.value);
     const locationRaw = $("[name='stock.locationId']", row).value;
     const quantity = integerOrZero($("[name='stock.quantity']", row).value);
     const minQuantity = integerOrZero($("[name='stock.minQuantity']", row).value);
     const source = nullableText($("[name='stock.source']", row).value);
+    const orderNumber = nullableText($("[name='stock.orderNumber']", row)?.value);
+    const unitPrice = nullableNumber($("[name='stock.unitPrice']", row)?.value);
+    const currency = unitPrice == null ? null : normalizeCurrency($("[name='stock.currency']", row)?.value || defaultCurrency(), defaultCurrency());
+    const dateAdded = $("[name='stock.dateAdded']", row)?.value || today;
+    const notes = nullableText($("[name='stock.notes']", row)?.value);
     const locationId = locationRaw ? Number(locationRaw) : null;
-    if (!locationId && quantity === 0 && minQuantity === 0 && !source) return;
-    state.inventory.stock.push({
-      id: nextId(state.inventory.stock),
+    if (!locationId && quantity === 0 && minQuantity === 0 && !source && !orderNumber && unitPrice == null && !notes) return;
+    const existing = rowId ? previousById.get(rowId) : null;
+    const next = {
+      id: existing?.id || nextId(state.inventory.stock.concat(nextRows)),
       partId,
       locationId,
       quantity,
       minQuantity,
       source,
-      orderNumber: null,
-      unitPrice: null,
-      currency: null,
-      dateAdded: today,
-      notes: null
+      orderNumber,
+      unitPrice,
+      currency,
+      dateAdded,
+      notes
+    };
+    nextRows.push(next);
+    const oldQuantity = numberOrZero(existing?.quantity);
+    if (existing && oldQuantity !== quantity) {
+      recordStockMovement({
+        movementType: "adjust",
+        partId,
+        fromLocationId: quantity < oldQuantity ? existing.locationId : null,
+        toLocationId: quantity > oldQuantity ? locationId : null,
+        quantity: Math.abs(quantity - oldQuantity),
+        notes: `manual stock edit ${quantity > oldQuantity ? "+" : "-"}${Math.abs(quantity - oldQuantity)}`
+      });
+    }
+  });
+  previousRows.forEach((row) => {
+    if (nextRows.some((next) => next.id === row.id)) return;
+    if (numberOrZero(row.quantity) > 0) {
+      recordStockMovement({
+        movementType: "adjust",
+        partId,
+        fromLocationId: row.locationId ?? null,
+        quantity: row.quantity,
+        notes: "stock lot removed in editor"
+      });
+    }
+  });
+  state.inventory.stock.push(...nextRows);
+}
+
+function updateAliasesFromForm(form, partId) {
+  state.inventory.partAliases = (state.inventory.partAliases || []).filter((row) => row.partId !== partId);
+  const rows = $$(".alias-row-edit", form);
+  const nextRows = [];
+  rows.forEach((row) => {
+    const aliasValue = textValue($("[name='alias.aliasValue']", row)?.value);
+    if (!aliasValue) return;
+    const rowId = nullableNumber($("[name='alias.id']", row)?.value);
+    nextRows.push({
+      id: rowId || nextId((state.inventory.partAliases || []).concat(nextRows)),
+      partId,
+      aliasType: nullableText($("[name='alias.aliasType']", row)?.value) || "alias",
+      aliasValue,
+      notes: nullableText($("[name='alias.notes']", row)?.value)
     });
   });
+  state.inventory.partAliases.push(...nextRows);
 }
 
 function deletePart(partId) {
@@ -187,6 +270,7 @@ function deletePart(partId) {
   state.inventory.attributes = state.inventory.attributes.filter((attr) => attr.partId !== partId);
   state.inventory.partAliases = (state.inventory.partAliases || []).filter((alias) => alias.partId !== partId);
   state.inventory.projectReservations = (state.inventory.projectReservations || []).filter((row) => row.partId !== partId);
+  state.inventory.stockMovements = (state.inventory.stockMovements || []).filter((row) => row.partId !== partId);
   (state.inventory.projectBom || []).forEach((row) => {
     if (row.partId === partId) {
       row.partId = null;
@@ -215,7 +299,7 @@ function openLocationModal(locationId = null) {
     <form id="locationForm" class="modal-card" novalidate>
       <div class="modal-head">
         <div><p class="path-line">inventory / storage editor</p><h3>${location ? "edit location" : "add location"}</h3></div>
-        <button type="button" class="icon-button" data-action="close-modal">×</button>
+        <button type="button" class="icon-button" data-action="close-modal">x</button>
       </div>
       <input type="hidden" name="id" value="${location ? location.id : ""}" />
       <div class="form-grid">
@@ -342,6 +426,16 @@ function openModal(html) {
   }
 }
 
+function openDrawer(html) {
+  const root = $("#modalRoot");
+  root.innerHTML = `<div class="modal-layer drawer-layer">${html}</div>`;
+
+  const form = $("form", root);
+  if (form) {
+    form.addEventListener("submit", handleSubmit);
+  }
+}
+
 function closeModal() {
   $("#modalRoot").innerHTML = "";
 }
@@ -354,11 +448,11 @@ function openBomRowModal(rowId) {
   const partOptions = [`<option value="">unresolved</option>`].concat(
     state.inventory.parts.map((part) => `<option value="${part.id}" ${row.partId === part.id ? "selected" : ""}>${escapeHtml(part.name)}</option>`)
   ).join("");
-  openModal(`
-    <form id="bomRowForm" class="modal-card" novalidate>
-      <div class="modal-head">
+  openDrawer(`
+    <form id="bomRowForm" class="drawer-card" novalidate>
+      <div class="drawer-head">
         <div><p class="path-line">project / BOM row</p><h3>edit BOM row</h3></div>
-        <button type="button" class="icon-button" data-action="close-modal">×</button>
+        <button type="button" class="icon-button" data-action="close-modal">x</button>
       </div>
       <input type="hidden" name="id" value="${row.id}" />
       <div class="form-grid">
@@ -372,6 +466,7 @@ function openBomRowModal(rowId) {
         <div class="field span-2"><label>notes</label><textarea name="notes">${escapeHtml(row.notes || "")}</textarea></div>
       </div>
       <div class="form-actions">
+        ${row.partId ? `<button type="button" data-action="take-bom-row" data-id="${row.id}">take qty</button>` : ""}
         <button type="button" class="ghost-button" data-action="close-modal">cancel</button>
         <button type="button" class="primary-button" data-action="save-bom-row">save BOM row</button>
       </div>
@@ -394,6 +489,54 @@ function saveBomRowFromForm(form) {
   logActivity("edit-bom-row", "project_bom", row.id, row.value || row.referencesText || "");
   touchInventory();
   if (!persistDatabase("BOM row updated", { dirty: true })) return;
+  closeModal();
+  render();
+}
+
+function openProjectDrawer(projectId) {
+  const project = state.inventory.projects.find((item) => item.id === Number(projectId));
+  if (!project) return;
+  const summary = projectSummary(project.id);
+  const cost = projectCostSummary(project.id);
+  openDrawer(`
+    <form id="projectForm" class="drawer-card" novalidate>
+      <div class="drawer-head">
+        <div><p class="path-line">project / metadata</p><h3>edit project</h3></div>
+        <button type="button" class="icon-button" data-action="close-modal">x</button>
+      </div>
+      <input type="hidden" name="id" value="${project.id}" />
+      ${renderSummaryStrip([
+        [summary.rows, "BOM rows"],
+        [summary.shortageRows, "shortages", summary.shortageRows ? "warn" : ""],
+        [formatMoney(cost.total, cost.currency), "priced total"],
+        [cost.missingPriceRows, "missing price", cost.missingPriceRows ? "warn" : ""]
+      ])}
+      <div class="form-grid">
+        <div class="field span-2"><label>name</label><input name="name" required value="${escapeAttr(project.name || "")}" /></div>
+        <div class="field"><label>revision</label><input name="revision" value="${escapeAttr(project.revision || "")}" /></div>
+        <div class="field"><label>source file</label><input name="sourceFile" value="${escapeAttr(project.sourceFile || "")}" /></div>
+        <div class="field span-2"><label>notes</label><textarea name="notes">${escapeHtml(project.notes || "")}</textarea></div>
+      </div>
+      <div class="form-actions">
+        <button type="button" class="ghost-button" data-action="close-modal">cancel</button>
+        <button type="button" class="primary-button" data-action="save-project">save project</button>
+      </div>
+    </form>
+  `);
+}
+
+function saveProjectFromForm(form) {
+  const fd = new FormData(form);
+  const project = state.inventory.projects.find((item) => item.id === Number(fd.get("id")));
+  if (!project) return;
+  project.name = textValue(fd.get("name")) || project.name;
+  project.revision = nullableText(fd.get("revision"));
+  project.sourceFile = nullableText(fd.get("sourceFile"));
+  project.notes = nullableText(fd.get("notes"));
+  project.updatedAt = new Date().toISOString();
+  logActivity("edit-project", "project", project.id, project.name);
+  touchInventory();
+  if (!persistDatabase("project updated", { dirty: true })) return;
   closeModal();
   render();
 }

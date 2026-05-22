@@ -12,7 +12,8 @@
         "app": { "type": "string" },
         "createdAt": { "type": "string" },
         "updatedAt": { "type": "string" },
-        "source": { "type": ["string", "null"] }
+        "source": { "type": ["string", "null"] },
+        "defaultCurrency": { "type": "string" }
       }
     },
     "categories": {
@@ -168,6 +169,25 @@
           "partId": { "type": "integer" },
           "quantity": { "type": "integer", "minimum": 0 },
           "locationId": { "type": ["integer", "null"] },
+          "createdAt": { "type": "string" },
+          "notes": { "type": ["string", "null"] }
+        }
+      }
+    },
+    "stockMovements": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["id", "movementType", "partId", "quantity"],
+        "properties": {
+          "id": { "type": "integer" },
+          "movementType": { "type": "string", "enum": ["move", "take", "adjust", "project-consume"] },
+          "partId": { "type": "integer" },
+          "fromLocationId": { "type": ["integer", "null"] },
+          "toLocationId": { "type": ["integer", "null"] },
+          "quantity": { "type": "integer", "minimum": 0 },
+          "projectId": { "type": ["integer", "null"] },
+          "bomRowId": { "type": ["integer", "null"] },
           "createdAt": { "type": "string" },
           "notes": { "type": ["string", "null"] }
         }

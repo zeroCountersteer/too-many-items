@@ -116,6 +116,13 @@ function stockSummary(partId) {
   };
 }
 
+function stockRowsForPart(partId, locationId = undefined) {
+  const rows = (state.inventory.stock || []).filter((row) => row.partId === Number(partId));
+  if (locationId === undefined) return rows;
+  const normalizedLocation = locationId === null || locationId === "" ? null : Number(locationId);
+  return rows.filter((row) => (row.locationId ?? null) === normalizedLocation);
+}
+
 function specSummary(part) {
   const kind = categoryKind(getCategoryName(part.categoryId));
   if (!kind) return "";
@@ -214,7 +221,8 @@ function createEmptyInventory() {
     meta: {
       app: "too-many-items",
       createdAt: now,
-      updatedAt: now
+      updatedAt: now,
+      defaultCurrency: "USD"
     },
     categories: DEFAULT_CATEGORIES.map((name, index) => ({ id: index + 1, name })),
     locations: [],
@@ -230,6 +238,7 @@ function createEmptyInventory() {
     projectBom: [],
     partAliases: [],
     projectReservations: [],
+    stockMovements: [],
     activityLog: []
   };
 }
@@ -253,6 +262,7 @@ function normalizeInventory(raw) {
   inv.projectBom = normalizeProjectBom(raw.projectBom || raw.project_bom || []);
   inv.partAliases = normalizePartAliases(raw.partAliases || raw.part_aliases || []);
   inv.projectReservations = normalizeProjectReservations(raw.projectReservations || raw.project_reservations || []);
+  inv.stockMovements = normalizeStockMovements(raw.stockMovements || raw.stock_movements || []);
   inv.activityLog = normalizeActivityLog(raw.activityLog || raw.activity_log || []);
   ensureInventoryShape(inv);
   normalizeReferences(inv);
@@ -265,7 +275,8 @@ function ensureInventoryShape(inv) {
   inv.meta.app = inv.meta.app || "too-many-items";
   inv.meta.createdAt = inv.meta.createdAt || new Date().toISOString();
   inv.meta.updatedAt = inv.meta.updatedAt || inv.meta.createdAt;
-  ["categories", "locations", "parts", "stock", "resistorSpecs", "capacitorSpecs", "inductorSpecs", "icSpecs", "keyswitchSpecs", "attributes", "projects", "projectBom", "partAliases", "projectReservations", "activityLog"].forEach((key) => {
+  inv.meta.defaultCurrency = normalizeCurrency(inv.meta.defaultCurrency || "USD");
+  ["categories", "locations", "parts", "stock", "resistorSpecs", "capacitorSpecs", "inductorSpecs", "icSpecs", "keyswitchSpecs", "attributes", "projects", "projectBom", "partAliases", "projectReservations", "stockMovements", "activityLog"].forEach((key) => {
     if (!Array.isArray(inv[key])) inv[key] = [];
   });
   if (!inv.categories.length) inv.categories = DEFAULT_CATEGORIES.map((name, index) => ({ id: index + 1, name }));
@@ -306,6 +317,13 @@ function normalizeReferences(inv) {
   inv.projectReservations = inv.projectReservations.filter((row) => projectIds.has(row.projectId) && partIds.has(row.partId));
   inv.projectReservations.forEach((row) => {
     if (row.locationId !== null && row.locationId !== undefined && !locationIds.has(row.locationId)) row.locationId = null;
+  });
+  inv.stockMovements = inv.stockMovements.filter((row) => partIds.has(row.partId));
+  inv.stockMovements.forEach((row) => {
+    if (row.fromLocationId !== null && row.fromLocationId !== undefined && !locationIds.has(row.fromLocationId)) row.fromLocationId = null;
+    if (row.toLocationId !== null && row.toLocationId !== undefined && !locationIds.has(row.toLocationId)) row.toLocationId = null;
+    if (row.projectId !== null && row.projectId !== undefined && !projectIds.has(row.projectId)) row.projectId = null;
+    if (row.bomRowId !== null && row.bomRowId !== undefined && !(inv.projectBom || []).some((bom) => bom.id === row.bomRowId)) row.bomRowId = null;
   });
 }
 
@@ -368,10 +386,16 @@ function normalizeStock(items) {
     source: nullableText(item.source),
     orderNumber: nullableText(item.orderNumber ?? item.order_number),
     unitPrice: nullableNumber(item.unitPrice ?? item.unit_price),
-    currency: nullableText(item.currency),
+    currency: item.currency ? normalizeCurrency(item.currency) : null,
     dateAdded: item.dateAdded ?? item.date_added ?? new Date().toISOString().slice(0, 10),
     notes: nullableText(item.notes)
   })).filter((item) => Number.isFinite(item.partId));
+}
+
+function normalizeCurrency(value, fallback = null) {
+  const raw = String(value ?? "").trim().toUpperCase();
+  if (!raw) return fallback;
+  return raw.replace(/[^A-Z0-9]/g, "").slice(0, 8) || fallback;
 }
 
 function normalizeSpecs(items, kind) {
@@ -413,6 +437,7 @@ function validateInventory(inv) {
     if (!partIds.has(row.partId)) errors.push(`stock row ${row.id} references missing part ${row.partId}`);
     if (row.locationId !== null && row.locationId !== undefined && !locationIds.has(row.locationId)) errors.push(`stock row ${row.id} references missing location ${row.locationId}`);
     if (row.quantity < 0) errors.push(`stock row ${row.id} has negative quantity`);
+    if (row.unitPrice !== null && row.unitPrice !== undefined && Number(row.unitPrice) < 0) errors.push(`stock row ${row.id} has negative unit price`);
   });
 
   inv.locations.forEach((location) => {
@@ -450,6 +475,16 @@ function validateInventory(inv) {
     if (!partIds.has(row.partId)) errors.push(`reservation ${row.id} references missing part ${row.partId}`);
     if (row.locationId !== null && row.locationId !== undefined && !locationIds.has(row.locationId)) errors.push(`reservation ${row.id} references missing location ${row.locationId}`);
     if (row.quantity < 0) errors.push(`reservation ${row.id} has negative quantity`);
+  });
+
+  (inv.stockMovements || []).forEach((row) => {
+    if (!partIds.has(row.partId)) errors.push(`stock movement ${row.id} references missing part ${row.partId}`);
+    if (!["move", "take", "adjust", "project-consume"].includes(row.movementType)) errors.push(`stock movement ${row.id} has invalid type ${row.movementType}`);
+    if (row.fromLocationId !== null && row.fromLocationId !== undefined && !locationIds.has(row.fromLocationId)) errors.push(`stock movement ${row.id} references missing source location ${row.fromLocationId}`);
+    if (row.toLocationId !== null && row.toLocationId !== undefined && !locationIds.has(row.toLocationId)) errors.push(`stock movement ${row.id} references missing destination location ${row.toLocationId}`);
+    if (row.projectId !== null && row.projectId !== undefined && !projectIds.has(row.projectId)) errors.push(`stock movement ${row.id} references missing project ${row.projectId}`);
+    if (row.bomRowId !== null && row.bomRowId !== undefined && !(inv.projectBom || []).some((bom) => bom.id === row.bomRowId)) errors.push(`stock movement ${row.id} references missing BOM row ${row.bomRowId}`);
+    if (row.quantity < 0) errors.push(`stock movement ${row.id} has negative quantity`);
   });
 
   (inv.activityLog || []).forEach((row) => {
@@ -499,6 +534,9 @@ function saveSettings(form) {
     path: textValue(fd.get("path")) || BUNDLED_DB_PATH
   };
   localStorage.setItem(STORAGE.githubConfig, JSON.stringify(state.githubConfig));
+  state.inventory.meta.defaultCurrency = normalizeCurrency(fd.get("defaultCurrency"), "USD");
+  touchInventory();
+  persistDatabase("settings saved", { dirty: true });
   const token = textValue(fd.get("token"));
   if (token) sessionStorage.setItem(STORAGE.token, token);
   setStatus("settings saved");
@@ -516,6 +554,7 @@ function captureSettingsFormIfPresent() {
     path: textValue(fd.get("path")) || BUNDLED_DB_PATH
   };
   localStorage.setItem(STORAGE.githubConfig, JSON.stringify(state.githubConfig));
+  state.inventory.meta.defaultCurrency = normalizeCurrency(fd.get("defaultCurrency"), state.inventory.meta.defaultCurrency || "USD");
   const token = textValue(fd.get("token"));
   if (token) sessionStorage.setItem(STORAGE.token, token);
 }
@@ -778,6 +817,25 @@ function normalizeProjectReservations(rows) {
   })).filter((row) => row.id > 0 && row.projectId > 0 && row.partId > 0);
 }
 
+function normalizeStockMovements(rows) {
+  const allowed = new Set(["move", "take", "adjust", "project-consume"]);
+  return (rows || []).map((row) => {
+    const movementType = textValue(row.movementType ?? row.movement_type);
+    return {
+      id: integerOrZero(row.id),
+      movementType: allowed.has(movementType) ? movementType : "adjust",
+      partId: integerOrZero(row.partId ?? row.part_id),
+      fromLocationId: nullableNumber(row.fromLocationId ?? row.from_location_id),
+      toLocationId: nullableNumber(row.toLocationId ?? row.to_location_id),
+      quantity: integerOrZero(row.quantity),
+      projectId: nullableNumber(row.projectId ?? row.project_id),
+      bomRowId: nullableNumber(row.bomRowId ?? row.bom_row_id),
+      createdAt: row.createdAt || row.created_at || new Date().toISOString(),
+      notes: nullableText(row.notes)
+    };
+  }).filter((row) => row.id > 0 && row.partId > 0);
+}
+
 function normalizeActivityLog(rows) {
   return (rows || []).map((row) => ({
     id: integerOrZero(row.id),
@@ -800,6 +858,235 @@ function logActivity(action, entityType, entityId, message) {
     message: message || null
   });
   state.inventory.activityLog = state.inventory.activityLog.slice(0, 300);
+}
+
+function defaultCurrency() {
+  const currency = normalizeCurrency(state.inventory.meta?.defaultCurrency, "USD");
+  state.inventory.meta.defaultCurrency = currency;
+  return currency;
+}
+
+function stockCurrency(row) {
+  return normalizeCurrency(row?.currency, defaultCurrency());
+}
+
+function formatMoney(value, currency = defaultCurrency()) {
+  const number = Number(value);
+  if (!Number.isFinite(number)) return "-";
+  return `${normalizeCurrency(currency, defaultCurrency())} ${trimMoney(number)}`;
+}
+
+function trimMoney(value) {
+  return Number(value).toFixed(4).replace(/\.?0+$/, "");
+}
+
+function recordStockMovement(input) {
+  const quantity = integerOrZero(input.quantity);
+  if (quantity <= 0) return null;
+  state.inventory.stockMovements = state.inventory.stockMovements || [];
+  const movement = {
+    id: nextId(state.inventory.stockMovements),
+    movementType: ["move", "take", "adjust", "project-consume"].includes(input.movementType) ? input.movementType : "adjust",
+    partId: Number(input.partId),
+    fromLocationId: input.fromLocationId === undefined ? null : nullableNumber(input.fromLocationId),
+    toLocationId: input.toLocationId === undefined ? null : nullableNumber(input.toLocationId),
+    quantity,
+    projectId: input.projectId === undefined ? null : nullableNumber(input.projectId),
+    bomRowId: input.bomRowId === undefined ? null : nullableNumber(input.bomRowId),
+    createdAt: input.createdAt || new Date().toISOString(),
+    notes: nullableText(input.notes)
+  };
+  state.inventory.stockMovements.unshift(movement);
+  state.inventory.stockMovements = state.inventory.stockMovements.slice(0, 1000);
+  return movement;
+}
+
+function stockLotSignature(row, locationId) {
+  return [
+    row.partId,
+    locationId ?? null,
+    row.source || "",
+    row.orderNumber || "",
+    row.unitPrice ?? "",
+    row.currency || "",
+    row.dateAdded || "",
+    row.notes || ""
+  ].join("|");
+}
+
+function findMergeableStockRow(template, locationId, excludeId = null) {
+  const signature = stockLotSignature(template, locationId);
+  return (state.inventory.stock || []).find((row) =>
+    row.id !== excludeId &&
+    row.partId === Number(template.partId) &&
+    stockLotSignature(row, row.locationId ?? null) === signature
+  ) || null;
+}
+
+function createDestinationStockRow(source, locationId) {
+  const row = {
+    ...source,
+    id: nextId(state.inventory.stock || []),
+    locationId: locationId ?? null,
+    quantity: 0,
+    minQuantity: 0
+  };
+  state.inventory.stock.push(row);
+  return row;
+}
+
+function moveStockFromRows(partId, fromLocationId, toLocationId, options = {}) {
+  const fromAny = fromLocationId === undefined || fromLocationId === "any";
+  const fromId = fromAny ? undefined : (fromLocationId === "" ? null : nullableNumber(fromLocationId));
+  const toId = toLocationId === "" || toLocationId === undefined ? null : nullableNumber(toLocationId);
+  if (!fromAny && (fromId ?? null) === (toId ?? null)) return { ok: false, error: "source and destination are the same", changed: 0, quantity: 0 };
+  const candidates = stockRowsForPart(partId, fromId).filter((row) => numberOrZero(row.quantity) > 0 && ((row.locationId ?? null) !== (toId ?? null)));
+  const total = candidates.reduce((sum, row) => sum + numberOrZero(row.quantity), 0);
+  const requested = options.all ? total : integerOrZero(options.quantity);
+  if (requested <= 0) return { ok: false, error: "quantity is required", changed: 0, quantity: 0 };
+  if (total < requested) return { ok: false, error: `only ${total} available`, changed: 0, quantity: 0 };
+
+  let remaining = requested;
+  let changed = 0;
+  let moved = 0;
+  for (const source of candidates) {
+    if (remaining <= 0) break;
+    const qty = Math.min(remaining, numberOrZero(source.quantity));
+    const target = findMergeableStockRow(source, toId, source.id) || createDestinationStockRow(source, toId);
+    source.quantity = numberOrZero(source.quantity) - qty;
+    target.quantity = numberOrZero(target.quantity) + qty;
+    remaining -= qty;
+    moved += qty;
+    changed += 1;
+    recordStockMovement({
+      movementType: "move",
+      partId,
+      fromLocationId: source.locationId ?? null,
+      toLocationId: toId,
+      quantity: qty,
+      notes: options.notes || `bulk move to ${toId ? locationPath(toId) : "no location"}`
+    });
+  }
+  return { ok: true, changed, quantity: moved };
+}
+
+function takeStock(partId, options = {}) {
+  const sourceId = options.locationId === undefined || options.locationId === "" ? undefined : nullableNumber(options.locationId);
+  const candidates = stockRowsForPart(partId, sourceId).filter((row) => numberOrZero(row.quantity) > 0);
+  const total = candidates.reduce((sum, row) => sum + numberOrZero(row.quantity), 0);
+  const requested = options.all ? total : integerOrZero(options.quantity);
+  if (requested <= 0) return { ok: false, error: "quantity is required", changed: 0, quantity: 0 };
+  if (total < requested) return { ok: false, error: `only ${total} available`, changed: 0, quantity: 0 };
+
+  let remaining = requested;
+  let changed = 0;
+  let taken = 0;
+  for (const source of candidates) {
+    if (remaining <= 0) break;
+    const qty = Math.min(remaining, numberOrZero(source.quantity));
+    source.quantity = numberOrZero(source.quantity) - qty;
+    remaining -= qty;
+    taken += qty;
+    changed += 1;
+    recordStockMovement({
+      movementType: options.movementType || "take",
+      partId,
+      fromLocationId: source.locationId ?? null,
+      toLocationId: null,
+      quantity: qty,
+      projectId: options.projectId ?? null,
+      bomRowId: options.bomRowId ?? null,
+      notes: options.notes || null
+    });
+  }
+  return { ok: true, changed, quantity: taken };
+}
+
+function setStockRowsMin(partIds, minQuantity) {
+  const ids = new Set(partIds.map(Number));
+  let changed = 0;
+  (state.inventory.stock || []).forEach((row) => {
+    if (!ids.has(row.partId)) return;
+    row.minQuantity = integerOrZero(minQuantity);
+    changed += 1;
+  });
+  return changed;
+}
+
+function setStockRowsSource(partIds, source) {
+  const ids = new Set(partIds.map(Number));
+  let changed = 0;
+  (state.inventory.stock || []).forEach((row) => {
+    if (!ids.has(row.partId)) return;
+    row.source = nullableText(source);
+    changed += 1;
+  });
+  return changed;
+}
+
+function setStockRowsPrice(partIds, unitPrice, currency) {
+  const ids = new Set(partIds.map(Number));
+  const price = nullableNumber(unitPrice);
+  const code = normalizeCurrency(currency || defaultCurrency(), defaultCurrency());
+  let changed = 0;
+  (state.inventory.stock || []).forEach((row) => {
+    if (!ids.has(row.partId)) return;
+    row.unitPrice = price;
+    row.currency = price == null ? null : code;
+    changed += 1;
+  });
+  return changed;
+}
+
+function partPriceInfo(partId) {
+  const currency = defaultCurrency();
+  const priced = stockRowsForPart(partId)
+    .filter((row) => numberOrZero(row.quantity) > 0 && row.unitPrice !== null && row.unitPrice !== undefined && Number.isFinite(Number(row.unitPrice)));
+  const currencies = [...new Set(priced.map(stockCurrency))];
+  const defaultRows = priced.filter((row) => stockCurrency(row) === currency);
+  const pricedQuantity = defaultRows.reduce((sum, row) => sum + numberOrZero(row.quantity), 0);
+  const totalValue = defaultRows.reduce((sum, row) => sum + numberOrZero(row.quantity) * Number(row.unitPrice), 0);
+  const unitPrice = pricedQuantity > 0 ? totalValue / pricedQuantity : null;
+  return {
+    currency,
+    unitPrice,
+    pricedQuantity,
+    pricedRows: defaultRows.length,
+    totalStock: stockSummary(partId).total,
+    missingPrice: defaultRows.length === 0,
+    mixedCurrency: currencies.some((code) => code !== currency),
+    currencies
+  };
+}
+
+function bomRowCost(row) {
+  if (!row.partId || row.fitted === 0) return { unitPrice: null, total: null, currency: defaultCurrency(), missing: !!row.partId, mixedCurrency: false };
+  const price = partPriceInfo(row.partId);
+  const quantity = integerOrZero(row.quantity);
+  return {
+    ...price,
+    total: price.unitPrice == null ? null : price.unitPrice * quantity,
+    missing: price.unitPrice == null
+  };
+}
+
+function projectCostSummary(projectId) {
+  const rows = projectBomRows(projectId).filter((row) => row.fitted !== 0);
+  let total = 0;
+  let pricedRows = 0;
+  let missingPriceRows = 0;
+  let mixedCurrencyRows = 0;
+  rows.forEach((row) => {
+    const cost = bomRowCost(row);
+    if (cost.mixedCurrency) mixedCurrencyRows += 1;
+    if (cost.total == null) {
+      if (row.partId) missingPriceRows += 1;
+      return;
+    }
+    total += cost.total;
+    pricedRows += 1;
+  });
+  return { total, currency: defaultCurrency(), pricedRows, missingPriceRows, mixedCurrencyRows };
 }
 
 function activeProject() {
@@ -987,19 +1274,45 @@ function applyProjectConsumption(projectId) {
   }
   if (!confirm("Subtract reserved quantities from stock?")) return;
   for (const reservation of rows) {
-    let remaining = numberOrZero(reservation.quantity);
-    const stockRows = state.inventory.stock.filter((row) => row.partId === reservation.partId && row.quantity > 0);
-    for (const stock of stockRows) {
-      if (remaining <= 0) break;
-      const take = Math.min(remaining, numberOrZero(stock.quantity));
-      stock.quantity = numberOrZero(stock.quantity) - take;
-      remaining -= take;
+    const result = takeStock(reservation.partId, {
+      quantity: reservation.quantity,
+      locationId: reservation.locationId ?? undefined,
+      projectId,
+      movementType: "project-consume",
+      notes: "consume reserved stock"
+    });
+    if (!result.ok) {
+      toast(`consume failed: ${result.error}`, "error");
+      return;
     }
   }
   state.inventory.projectReservations = state.inventory.projectReservations.filter((row) => row.projectId !== Number(projectId));
   logActivity("consume-project", "project", projectId, "stock consumed from reservations");
   touchInventory();
   if (!persistDatabase("project stock consumed", { dirty: true })) return;
+  render();
+}
+
+function takeBomRow(rowId, quantity = null) {
+  const row = state.inventory.projectBom.find((item) => item.id === Number(rowId));
+  if (!row || !row.partId) {
+    toast("BOM row is unresolved", "error");
+    return;
+  }
+  const qty = quantity == null ? integerOrZero(row.quantity) : integerOrZero(quantity);
+  const result = takeStock(row.partId, {
+    quantity: qty,
+    projectId: row.projectId,
+    bomRowId: row.id,
+    notes: `project take: ${row.referencesText || row.value || "BOM row"}`
+  });
+  if (!result.ok) {
+    toast(`take failed: ${result.error}`, "error");
+    return;
+  }
+  logActivity("take-bom-row", "project_bom", row.id, `${result.quantity} taken`);
+  touchInventory();
+  if (!persistDatabase("project parts taken", { dirty: true })) return;
   render();
 }
 
@@ -1020,6 +1333,7 @@ window.deleteBomRow = deleteBomRow;
 window.reserveProjectParts = reserveProjectParts;
 window.releaseProjectReservations = releaseProjectReservations;
 window.applyProjectConsumption = applyProjectConsumption;
+window.takeBomRow = takeBomRow;
 window.logActivity = logActivity;
 window.invalidateIndexes = invalidateIndexes;
 
@@ -1028,6 +1342,7 @@ window.rebuildIndexes = rebuildIndexes;
 Object.assign(window, {
   filteredParts,
   stockSummary,
+  stockRowsForPart,
   specSummary,
   primarySpecValue,
   parseSpecFilterValue,
@@ -1044,6 +1359,7 @@ Object.assign(window, {
   normalizeLocations,
   normalizeParts,
   normalizeStock,
+  normalizeCurrency,
   normalizeSpecs,
   normalizeAttributes,
   validateInventory,
@@ -1062,6 +1378,18 @@ Object.assign(window, {
   storageStats,
   categoryStats,
   projectStats,
+  defaultCurrency,
+  stockCurrency,
+  formatMoney,
+  recordStockMovement,
+  moveStockFromRows,
+  takeStock,
+  setStockRowsMin,
+  setStockRowsSource,
+  setStockRowsPrice,
+  partPriceInfo,
+  bomRowCost,
+  projectCostSummary,
   highlightLocation,
   normalizeProjects,
   normalizeProjectBom,
@@ -1084,6 +1412,7 @@ Object.assign(window, {
   reserveProjectParts,
   releaseProjectReservations,
   applyProjectConsumption,
+  takeBomRow,
   logActivity,
   invalidateIndexes,
   rebuildIndexes

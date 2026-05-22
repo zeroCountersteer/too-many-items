@@ -170,7 +170,8 @@ function databaseToInventory(db) {
     meta: {
       app: metaMap.app || "too-many-items",
       createdAt: metaMap.createdAt || metaMap.created_at || new Date().toISOString(),
-      updatedAt: metaMap.updatedAt || metaMap.updated_at || new Date().toISOString()
+      updatedAt: metaMap.updatedAt || metaMap.updated_at || new Date().toISOString(),
+      defaultCurrency: metaMap.defaultCurrency || metaMap.default_currency || "USD"
     },
     categories: selectTable(db, "categories", { id: "id", name: "name" }, "ORDER BY \"id\""),
     locations: selectTable(db, "locations", {
@@ -291,6 +292,18 @@ function databaseToInventory(db) {
       createdAt: "created_at",
       notes: "notes"
     }, "ORDER BY \"project_id\", \"id\""),
+    stockMovements: selectTable(db, "stock_movements", {
+      id: "id",
+      movementType: "movement_type",
+      partId: "part_id",
+      fromLocationId: "from_location_id",
+      toLocationId: "to_location_id",
+      quantity: "quantity",
+      projectId: "project_id",
+      bomRowId: "bom_row_id",
+      createdAt: "created_at",
+      notes: "notes"
+    }, "ORDER BY \"id\" DESC"),
     activityLog: selectTable(db, "activity_log", {
       id: "id",
       createdAt: "created_at",
@@ -334,7 +347,8 @@ function inventoryToDatabaseBytes(inventory) {
       app: inv.meta.app || "too-many-items",
       schemaVersion: String(inv.schemaVersion || 1),
       createdAt: inv.meta.createdAt || new Date().toISOString(),
-      updatedAt: inv.meta.updatedAt || new Date().toISOString()
+      updatedAt: inv.meta.updatedAt || new Date().toISOString(),
+      defaultCurrency: normalizeCurrency(inv.meta.defaultCurrency || "USD", "USD")
     };
     Object.entries(meta).forEach(([key, value]) => {
       db.run("INSERT INTO \"app_meta\" (\"key\", \"value\") VALUES (?, ?)", [key, sqlValue(value)]);
@@ -455,6 +469,21 @@ function inventoryToDatabaseBytes(inventory) {
         row.partId,
         integerOrZero(row.quantity),
         sqlValue(row.locationId),
+        row.createdAt || new Date().toISOString(),
+        sqlValue(row.notes)
+      ]);
+    });
+
+    (inv.stockMovements || []).forEach((row) => {
+      db.run(`INSERT INTO "stock_movements" ("id", "movement_type", "part_id", "from_location_id", "to_location_id", "quantity", "project_id", "bom_row_id", "created_at", "notes") VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`, [
+        row.id,
+        row.movementType,
+        row.partId,
+        sqlValue(row.fromLocationId),
+        sqlValue(row.toLocationId),
+        integerOrZero(row.quantity),
+        sqlValue(row.projectId),
+        sqlValue(row.bomRowId),
         row.createdAt || new Date().toISOString(),
         sqlValue(row.notes)
       ]);

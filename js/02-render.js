@@ -102,6 +102,7 @@ function renderSettingsView() {
       ${renderSummaryStrip([
         [cfg.owner || DEFAULT_REPO_OWNER, "owner"],
         [cfg.repo || DEFAULT_REPO_NAME, "repo"],
+        [defaultCurrency(), "currency"],
         [tokenPresent, "token"],
         [state.githubSha ? "recorded" : "none", "remote version"]
       ])}
@@ -114,6 +115,7 @@ function renderSettingsView() {
             <div class="field"><label>repo</label><input name="repo" value="${escapeAttr(cfg.repo || "")}" placeholder="inventory-data" /></div>
             <div class="field"><label>branch</label><input name="branch" value="${escapeAttr(cfg.branch || "main")}" placeholder="main" /></div>
             <div class="field"><label>path</label><input name="path" value="${escapeAttr(cfg.path || BUNDLED_DB_PATH)}" placeholder="data/inventory.db" /></div>
+            <div class="field"><label>default currency</label><input name="defaultCurrency" value="${escapeAttr(defaultCurrency())}" placeholder="USD" /></div>
             <div class="field span-2"><label>fine-grained token, Contents: read/write</label><input type="password" name="token" placeholder="session only" autocomplete="off" /></div>
           </div>
           <div class="action-row">
@@ -221,6 +223,8 @@ function renderPartsView() {
         [metrics.lowStock, "low stock", metrics.lowStock ? "warn" : ""]
       ])}
 
+      ${renderBulkActionToolbar(filtered)}
+
       <details class="panel advanced-panel">
         <summary>Filters and columns</summary>
         <div class="toolbar-main advanced-filters">
@@ -237,6 +241,43 @@ function renderPartsView() {
       ${table}
     </div>
   `;
+}
+
+function renderBulkActionToolbar(filtered) {
+  const visibleIds = new Set(filtered.map((part) => part.id));
+  state.selectedPartIds = new Set([...(state.selectedPartIds || [])].filter((id) => state.inventory.parts.some((part) => part.id === id)));
+  const selected = [...state.selectedPartIds].filter((id) => visibleIds.has(id));
+  const locationOptions = state.inventory.locations.map((location) => `<option value="${location.id}">${escapeHtml(locationPath(location.id))}</option>`).join("");
+  const preview = state.bulkOperationPreview || "";
+  return `<section class="panel bulk-ops-panel">
+    <div class="bulk-ops-head">
+      <strong>${selected.length} selected</strong>
+      <span>${filtered.length} visible</span>
+      <div class="action-row">
+        <button type="button" data-action="select-visible-parts">select visible</button>
+        <button type="button" data-action="clear-part-selection">clear</button>
+      </div>
+    </div>
+    <div class="bulk-ops-grid">
+      <div class="field"><label>source</label><select id="bulkFromLocation"><option value="any">any location</option><option value="none">no location</option>${locationOptions}</select></div>
+      <div class="field"><label>destination</label><select id="bulkToLocation"><option value="none">no location</option>${locationOptions}</select></div>
+      <div class="field"><label>move qty</label><input id="bulkMoveQty" type="number" min="0" step="1" placeholder="blank = all" /></div>
+      <div class="field"><label>take qty</label><input id="bulkTakeQty" type="number" min="0" step="1" placeholder="per part" /></div>
+      <div class="field"><label>min stock</label><input id="bulkMinQty" type="number" min="0" step="1" /></div>
+      <div class="field"><label>source label</label><input id="bulkSourceText" placeholder="LCSC, Mouser, stash" /></div>
+      <div class="field"><label>unit price</label><input id="bulkUnitPrice" type="number" min="0" step="0.0001" /></div>
+      <div class="field"><label>currency</label><input id="bulkCurrency" value="${escapeAttr(defaultCurrency())}" /></div>
+    </div>
+    <div class="action-row">
+      <button type="button" data-action="preview-bulk-move" ${selected.length ? "" : "disabled"}>preview move</button>
+      <button type="button" class="primary-button" data-action="apply-bulk-move" ${selected.length ? "" : "disabled"}>move</button>
+      <button type="button" data-action="bulk-take" ${selected.length ? "" : "disabled"}>take</button>
+      <button type="button" data-action="bulk-set-min" ${selected.length ? "" : "disabled"}>set min</button>
+      <button type="button" data-action="bulk-set-source" ${selected.length ? "" : "disabled"}>set source</button>
+      <button type="button" data-action="bulk-set-price" ${selected.length ? "" : "disabled"}>set price</button>
+    </div>
+    <div id="bulkOperationPreview" class="bulk-operation-preview">${preview}</div>
+  </section>`;
 }
 
 function renderPartsTable(parts, totalCount) {
@@ -256,14 +297,20 @@ function renderPartsTable(parts, totalCount) {
     if (col === "quantity") return `<td><span class="${low ? "qty-low" : "qty-ok"}">${stock.total}</span></td>`;
     if (col === "min") return `<td>${stock.min || ""}</td>`;
     if (col === "location") return `<td>${escapeHtml(stock.locations || "-")}</td>`;
+    if (col === "price") {
+      const price = partPriceInfo(part.id);
+      return `<td>${price.unitPrice == null ? `<span class="muted">missing</span>` : escapeHtml(formatMoney(price.unitPrice, price.currency))}${price.mixedCurrency ? ` <span class="danger-text">mixed</span>` : ""}</td>`;
+    }
     if (col === "manufacturer") return `<td>${escapeHtml(part.manufacturer || "")}</td>`;
     if (col === "mpn") return `<td>${escapeHtml(part.mpn || "")}</td>`;
     if (col === "notes") return `<td>${escapeHtml(part.notes || "")}</td>`;
-    if (col === "actions") return `<td class="action-cell"><button type="button" class="ghost-button small-button" data-action="open-edit-part" data-id="${part.id}">edit</button></td>`;
+    if (col === "actions") return `<td class="action-cell"><button type="button" class="ghost-button small-button" data-action="take-part" data-id="${part.id}">take</button><button type="button" class="ghost-button small-button" data-action="open-edit-part" data-id="${part.id}">edit</button></td>`;
     return "";
   };
-  const headers = columns.map((col) => `<th>${escapeHtml(PART_COLUMN_DEFS[col] || "Actions")}</th>`).join("");
-  const rows = parts.map((part) => `<tr>${columns.map((col) => renderCell(part, col)).join("")}</tr>`).join("");
+  const visibleIds = new Set(parts.map((part) => part.id));
+  const allVisibleSelected = parts.length > 0 && parts.every((part) => state.selectedPartIds?.has(part.id));
+  const headers = `<th class="select-cell"><input type="checkbox" data-select-visible-parts ${allVisibleSelected ? "checked" : ""} /></th>` + columns.map((col) => `<th>${escapeHtml(PART_COLUMN_DEFS[col] || "Actions")}</th>`).join("");
+  const rows = parts.map((part) => `<tr class="${state.selectedPartIds?.has(part.id) ? "selected-row" : ""}"><td class="select-cell"><input type="checkbox" data-part-select value="${part.id}" ${state.selectedPartIds?.has(part.id) ? "checked" : ""} /></td>${columns.map((col) => renderCell(part, col)).join("")}</tr>`).join("");
   const more = totalCount > parts.length ? `<div class="table-more">${parts.length} of ${totalCount} rows rendered. Increase the render limit in Filters and columns.</div>` : "";
   return `<div class="table-wrap"><table class="data-table compact-parts-table"><thead><tr>${headers}</tr></thead><tbody>${rows}</tbody></table></div>${more}`;
 }
@@ -276,6 +323,15 @@ function renderDatabaseView() {
   const storageRows = storage.byLocation.slice(0, 12).map((row) => renderBar(locationPath(row.location.id), row.quantity, row.fill == null ? Math.min(100, row.quantity ? 12 : 0) : row.fill)).join("");
   const pstats = projectStats();
   const reservations = (state.inventory.projectReservations || []).length;
+  const missingPrices = state.inventory.parts.filter((part) => stockSummary(part.id).total > 0 && partPriceInfo(part.id).missingPrice).length;
+  const mixedCurrency = state.inventory.parts.filter((part) => partPriceInfo(part.id).mixedCurrency).length;
+  const recentMovements = (state.inventory.stockMovements || []).slice(0, 12);
+  const movementRows = recentMovements.map((row) => {
+    const part = state.inventory.parts.find((item) => item.id === row.partId);
+    const from = row.fromLocationId ? locationPath(row.fromLocationId) : "";
+    const to = row.toLocationId ? locationPath(row.toLocationId) : "";
+    return `<tr><td>${escapeHtml(formatDate(row.createdAt))}</td><td>${escapeHtml(row.movementType)}</td><td>${escapeHtml(part?.name || `part ${row.partId}`)}</td><td>${row.quantity}</td><td>${escapeHtml([from, to].filter(Boolean).join(" -> ") || "-")}</td><td>${escapeHtml(row.notes || "")}</td></tr>`;
+  }).join("");
   const healthDetails = validation.ok
     ? "Inventory references are valid."
     : `<ul class="validation-list">${validation.errors.slice(0, 8).map((error) => `<li>${escapeHtml(error)}</li>`).join("")}${validation.errors.length > 8 ? `<li>${validation.errors.length - 8} more issues</li>` : ""}</ul>`;
@@ -297,12 +353,15 @@ function renderDatabaseView() {
         ${summaryChipHtml(metrics.lowStock, "low stock", metrics.lowStock ? "warn" : "")}
         ${summaryChipHtml(metrics.locations, "locations")}
         ${summaryChipHtml(pstats.projects, "projects")}
+        ${summaryChipHtml(missingPrices, "missing prices", missingPrices ? "warn" : "")}
+        ${summaryChipHtml(mixedCurrency, "mixed currency", mixedCurrency ? "warn" : "")}
       </div>
 
       <div class="database-grid stats-grid">
         <section class="panel stat-big"><h4>inventory</h4><div class="stat-number">${metrics.parts}</div><p>${metrics.quantity} items / ${metrics.stockRecords} stock rows</p></section>
         <section class="panel stat-big"><h4>storage</h4><div class="stat-number">${metrics.locations}</div><p>${storage.orphanRows} stock rows without location</p></section>
         <section class="panel stat-big"><h4>projects</h4><div class="stat-number">${pstats.projects}</div><p>${pstats.bomRows} BOM rows / ${pstats.unresolved} unresolved / ${reservations} reservations</p></section>
+        <section class="panel stat-big"><h4>pricing</h4><div class="stat-number">${missingPrices}</div><p>${mixedCurrency} mixed-currency parts / default ${escapeHtml(defaultCurrency())}</p></section>
         <section class="panel health-panel ${validation.ok ? "ok-card" : "warn-card"}"><h4>health</h4>${validation.ok ? `<p>${healthDetails}</p>` : healthDetails}</section>
       </div>
 
@@ -310,6 +369,11 @@ function renderDatabaseView() {
         <section class="panel"><h4>category distribution</h4><div class="bar-list">${catRows || "<p>No category data.</p>"}</div></section>
         <section class="panel"><h4>storage occupancy</h4><div class="bar-list">${storageRows || "<p>No locations yet.</p>"}</div></section>
       </div>
+
+      <section class="panel">
+        <div class="panel-head"><h4>recent stock movements</h4><p>${recentMovements.length} latest move/take/adjust events</p></div>
+        <div class="table-wrap compact-table"><table class="data-table"><thead><tr><th>Date</th><th>Type</th><th>Part</th><th>Qty</th><th>Route</th><th>Notes</th></tr></thead><tbody>${movementRows || `<tr><td colspan="6">No stock movement history yet.</td></tr>`}</tbody></table></div>
+      </section>
 
       <section class="panel">
         <div class="panel-head">
@@ -392,6 +456,7 @@ function renderLocationNode(location, depth = 0) {
         ${fill != null ? `<div class="stat-bar small"><span style="width:${fill}%"></span></div>` : ""}
       </div>
       <div class="action-row row-actions">
+        <button type="button" class="ghost-button" data-action="move-selected-here" data-id="${location.id}">move selected here</button>
         <button type="button" class="ghost-button" data-action="highlight-location" data-id="${location.id}">highlight</button>
         <button type="button" class="ghost-button" data-action="open-edit-location" data-id="${location.id}">edit</button>
         <button type="button" class="danger-button" data-action="delete-location" data-id="${location.id}">delete</button>
@@ -405,6 +470,7 @@ function renderAddImportView() {
   const locations = [`<option value="">no default location</option>`].concat(
     state.inventory.locations.map((location) => `<option value="${location.id}">${escapeHtml(locationPath(location.id))}</option>`)
   ).join("");
+  const projectOptions = (state.inventory.projects || []).map((project) => `<option value="${project.id}">${escapeHtml(project.name)}${project.revision ? ` / ${escapeHtml(project.revision)}` : ""}</option>`).join("");
 
   return `
     <div class="view-stack">
@@ -415,7 +481,7 @@ function renderAddImportView() {
       ${renderSummaryStrip([
         ["row editor", "bulk add"],
         ["E3-E96", "series"],
-        ["KiCad CSV", "project BOM"]
+        ["CSV / TSV", "project BOM"]
       ])}
       <div class="add-import-grid">
         <section class="panel form-section add-card">
@@ -465,17 +531,21 @@ function renderAddImportView() {
         </section>
 
         <section class="panel form-section add-card bom-import-card">
-          <div class="panel-head"><h4>KiCad BOM import</h4></div>
+          <div class="panel-head"><h4>project BOM import</h4></div>
           <form id="kicadBomForm" novalidate onsubmit="return false;">
             <div class="form-grid">
+              <div class="field"><label>mode</label><select name="projectMode"><option value="create">create project</option><option value="update">update existing</option></select></div>
+              <div class="field"><label>existing project</label><select name="existingProjectId"><option value="">choose project</option>${projectOptions}</select></div>
               <div class="field"><label>project name</label><input name="projectName" placeholder="My keyboard PCB" /></div>
               <div class="field"><label>revision</label><input name="revision" placeholder="rev A" /></div>
-              <div class="field span-2"><label>BOM CSV</label><textarea name="bomCsv" class="bulk-textarea" placeholder='"Id","Designator","Package","Quantity","Designation","Supplier and ref"'></textarea></div>
+              <div class="field span-2"><label>BOM CSV / TSV</label><textarea name="bomCsv" class="bulk-textarea" placeholder='Refs,Qty,Value,Footprint,MPN&#10;R1 R2,2,10k,R_0603_1608Metric,RC0603FR-0710KL'></textarea></div>
             </div>
             <div class="action-row">
-              <button type="button" class="primary-button" data-action="import-kicad-bom">store project BOM</button>
+              <button type="button" data-action="preview-bom-import">preview import</button>
+              <button type="button" class="primary-button" data-action="import-kicad-bom">store BOM</button>
             </div>
           </form>
+          <div id="bomPreview" class="bulk-preview"></div>
         </section>
       </div>
     </div>
@@ -505,7 +575,7 @@ function renderProjectsView() {
           <span>${escapeHtml(item.revision || "no rev")} / ${summary.rows} rows / ${summary.shortageRows} shortages</span>
         </button>`;
       }).join("")
-    : `<div class="empty-panel compact"><h3>no projects</h3><p>Import a KiCad BOM from the Add view.</p><button type="button" data-action="set-view" data-target-view="add">import BOM</button></div>`;
+    : `<div class="empty-panel compact"><h3>no projects</h3><p>Import a CSV or TSV BOM from the Add view.</p><button type="button" data-action="set-view" data-target-view="add">import BOM</button></div>`;
 
   if (!project) {
     return `
@@ -520,6 +590,7 @@ function renderProjectsView() {
   }
 
   const summary = projectSummary(project.id);
+  const cost = projectCostSummary(project.id);
   const rows = projectBomRows(project.id)
     .filter((row) => {
       const q = String(state.projectQuery || "").toLowerCase();
@@ -534,6 +605,7 @@ function renderProjectsView() {
         <h3 class="view-title">projects / BOM</h3>
         <div class="action-row">
           <button type="button" data-action="set-view" data-target-view="add">import BOM</button>
+          <button type="button" data-action="open-edit-project" data-id="${project.id}">edit project</button>
           <button type="button" data-action="reserve-project" data-id="${project.id}">reserve</button>
           <button type="button" data-action="release-project" data-id="${project.id}">release</button>
           <button type="button" class="danger-button" data-action="apply-project-consumption" data-id="${project.id}">consume stock</button>
@@ -555,7 +627,10 @@ function renderProjectsView() {
               [summary.needed, "needed"],
               [summary.reserved, "reserved"],
               [summary.unresolved, "unresolved", summary.unresolved ? "warn" : ""],
-              [summary.shortageRows, "shortages", summary.shortageRows ? "warn" : ""]
+              [summary.shortageRows, "shortages", summary.shortageRows ? "warn" : ""],
+              [formatMoney(cost.total, cost.currency), "BOM total"],
+              [cost.missingPriceRows, "missing price", cost.missingPriceRows ? "warn" : ""],
+              [cost.mixedCurrencyRows, "mixed currency", cost.mixedCurrencyRows ? "warn" : ""]
             ])}
             <input type="search" data-project-search value="${escapeAttr(state.projectQuery || "")}" placeholder="filter BOM rows" />
           </div>
@@ -570,6 +645,7 @@ function renderBomTable(project, rows) {
   const body = rows.length ? rows.map((row) => {
     const part = row.partId ? state.inventory.parts.find((item) => item.id === row.partId) : null;
     const status = bomRowStatus(row);
+    const cost = bomRowCost(row);
     return `<tr class="${status.shortage ? "bom-shortage" : ""}">
       <td>${escapeHtml(row.referencesText || "")}</td>
       <td>${escapeHtml(row.value || "")}</td>
@@ -580,15 +656,17 @@ function renderBomTable(project, rows) {
       <td>${status.available}</td>
       <td>${status.reserved}</td>
       <td>${status.shortage ? `<span class="qty-low">${status.shortage}</span>` : `<span class="qty-ok">0</span>`}</td>
+      <td>${cost.total == null ? `<span class="muted">missing</span>` : escapeHtml(formatMoney(cost.total, cost.currency))}${cost.mixedCurrency ? ` <span class="danger-text">mixed</span>` : ""}</td>
       <td>${row.fitted === 0 ? "no" : "yes"}</td>
       <td class="bom-actions action-cell">
         <button type="button" data-action="match-bom-row" data-id="${row.id}">match</button>
+        ${row.partId ? `<button type="button" data-action="take-bom-row" data-id="${row.id}">take</button>` : ""}
         <button type="button" data-action="open-edit-bom-row" data-id="${row.id}">edit</button>
         <button type="button" data-action="unlink-bom-row" data-id="${row.id}">unlink</button>
         <button type="button" class="danger-button" data-action="delete-bom-row" data-id="${row.id}">delete</button>
       </td>
     </tr>`;
-  }).join("") : `<tr><td colspan="11">No BOM rows.</td></tr>`;
+  }).join("") : `<tr><td colspan="12">No BOM rows.</td></tr>`;
 
   return `<div class="table-wrap"><table class="data-table compact-parts-table bom-table">
     <thead><tr>${Object.values(PROJECT_COLUMN_DEFS).map((label) => `<th>${escapeHtml(label || "Actions")}</th>`).join("")}</tr></thead>

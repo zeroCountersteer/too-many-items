@@ -152,7 +152,8 @@ summary {
 .main-window,
 .panel,
 .content-card,
-.modal-card {
+.modal-card,
+.drawer-card {
   border: 1px solid var(--panel-border);
   border-radius: var(--radius-lg);
   background: var(--panel-bg);
@@ -442,11 +443,46 @@ summary {
   background: color-mix(in srgb, var(--warning) 8%, var(--panel-bg));
 }
 
+.bulk-ops-panel {
+  display: grid;
+  gap: 8px;
+  padding: 8px;
+}
+
+.bulk-ops-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  color: var(--text-faint);
+  font-size: 12px;
+}
+
+.bulk-ops-head strong {
+  color: var(--text-strong);
+}
+
+.bulk-ops-grid {
+  display: grid;
+  grid-template-columns: repeat(8, minmax(80px, 1fr));
+  gap: 6px;
+}
+
+.bulk-operation-preview:empty {
+  display: none;
+}
+
+.mini-preview {
+  max-height: 240px;
+}
+
 .panel,
-.form-section,
-.database-card,
-.settings-card {
+.form-section {
   padding: 10px;
+}
+
+.panel {
+  align-self: start;
 }
 
 .panel-head,
@@ -550,6 +586,20 @@ td {
 
 tbody tr:hover td {
   background: color-mix(in srgb, var(--accent) 5%, var(--panel-bg));
+}
+
+.selected-row td {
+  background: color-mix(in srgb, var(--accent) 8%, var(--panel-bg));
+}
+
+.select-cell {
+  width: 34px;
+  text-align: center;
+}
+
+.select-cell input {
+  width: auto;
+  min-height: auto;
 }
 
 th:last-child,
@@ -946,7 +996,7 @@ th:last-child {
 }
 
 .project-summary-panel .summary-strip {
-  grid-template-columns: repeat(5, minmax(0, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
 }
 
 .theme-select-row,
@@ -1023,7 +1073,25 @@ th:last-child {
   padding: 12px;
 }
 
-.modal-head {
+.drawer-layer {
+  place-items: stretch end;
+  padding: 0;
+}
+
+.drawer-card {
+  width: min(760px, 100vw);
+  height: 100dvh;
+  max-height: 100dvh;
+  display: grid;
+  align-content: start;
+  gap: 10px;
+  overflow: auto;
+  border-radius: var(--radius-lg) 0 0 var(--radius-lg);
+  padding: 12px;
+}
+
+.modal-head,
+.drawer-head {
   display: flex;
   align-items: flex-start;
   justify-content: space-between;
@@ -1032,7 +1100,8 @@ th:last-child {
   padding-bottom: 8px;
 }
 
-.modal-head h3 {
+.modal-head h3,
+.drawer-head h3 {
   margin: 0;
   color: var(--text-strong);
 }
@@ -1044,7 +1113,19 @@ th:last-child {
 
 .stock-row-edit {
   display: grid;
-  grid-template-columns: minmax(150px, 1fr) 86px 86px minmax(120px, 1fr) auto;
+  grid-template-columns: minmax(150px, 1.5fr) 76px 76px minmax(120px, 1fr) minmax(110px, 1fr) 90px 74px 120px minmax(140px, 1fr) auto auto;
+  gap: 6px;
+  align-items: end;
+}
+
+.alias-editor {
+  display: grid;
+  gap: 6px;
+}
+
+.alias-row-edit {
+  display: grid;
+  grid-template-columns: 110px minmax(180px, 1fr) minmax(160px, 1fr) auto;
   gap: 6px;
   align-items: end;
 }
@@ -1198,6 +1279,7 @@ th:last-child {
 
   .parts-toolbar,
   .advanced-filters,
+  .bulk-ops-grid,
   .compact-defaults,
   .form-grid,
   .summary-strip,
@@ -1214,6 +1296,7 @@ th:last-child {
   }
 
   .stock-row-edit,
+  .alias-row-edit,
   .bulk-line {
     grid-template-columns: 1fr 1fr;
   }
@@ -1240,6 +1323,7 @@ th:last-child {
   .navi-menu,
   .parts-toolbar,
   .advanced-filters,
+  .bulk-ops-grid,
   .compact-defaults,
   .form-grid,
   .summary-strip,
@@ -1249,6 +1333,7 @@ th:last-child {
   .theme-editor-grid,
   .kv-list,
   .stock-row-edit,
+  .alias-row-edit,
   .bulk-line {
     grid-template-columns: 1fr;
   }
@@ -1273,6 +1358,15 @@ th:last-child {
 
   .modal-layer {
     padding: 8px;
+  }
+
+  .drawer-layer {
+    padding: 0;
+  }
+
+  .drawer-card {
+    width: 100vw;
+    border-radius: 0;
   }
 }
 

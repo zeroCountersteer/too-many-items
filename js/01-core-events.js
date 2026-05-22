@@ -13,6 +13,8 @@ const state = {
   specFilterMax: "",
   specFilterExtra: "",
   selectedBulkRow: 0,
+  selectedPartIds: new Set(),
+  bulkOperationPreview: "",
   visibleColumns: loadJsonFromStorage(STORAGE.visibleColumns || "tmi.visibleColumns", DEFAULT_PART_COLUMNS),
   activeProjectId: Number(localStorage.getItem(STORAGE.activeProjectId || "tmi.activeProjectId") || 0),
   projectQuery: "",
@@ -119,6 +121,35 @@ function handleClick(event) {
     case "import-kicad-bom":
       importKiCadBomFromForm();
       break;
+    case "preview-bom-import":
+      previewBomImport();
+      break;
+    case "select-visible-parts":
+      selectVisibleParts();
+      break;
+    case "clear-part-selection":
+      state.selectedPartIds.clear();
+      state.bulkOperationPreview = "";
+      renderPartsViewOnly();
+      break;
+    case "preview-bulk-move":
+      previewBulkMove();
+      break;
+    case "apply-bulk-move":
+      applyBulkMove();
+      break;
+    case "bulk-take":
+      applyBulkTake();
+      break;
+    case "bulk-set-min":
+      applyBulkMin();
+      break;
+    case "bulk-set-source":
+      applyBulkSource();
+      break;
+    case "bulk-set-price":
+      applyBulkPrice();
+      break;
     case "save-columns":
       saveVisibleColumns();
       break;
@@ -127,6 +158,9 @@ function handleClick(event) {
       break;
     case "highlight-location":
       highlightLocation(id);
+      break;
+    case "move-selected-here":
+      moveSelectedToLocation(id);
       break;
     case "select-project":
       selectProject(id);
@@ -143,6 +177,17 @@ function handleClick(event) {
     case "apply-project-consumption":
       applyProjectConsumption(id);
       break;
+    case "take-bom-row":
+      takeBomRow(id);
+      break;
+    case "open-edit-project":
+      openProjectDrawer(id);
+      break;
+    case "save-project": {
+      const form = $("#projectForm");
+      if (form) saveProjectFromForm(form);
+      break;
+    }
     case "show-more-parts":
       state.renderLimit = Number(state.renderLimit || PERFORMANCE_DEFAULTS.renderLimit) + PERFORMANCE_DEFAULTS.renderLimit;
       localStorage.setItem(STORAGE.renderLimit || "tmi.renderLimit", String(state.renderLimit));
@@ -185,6 +230,12 @@ function handleClick(event) {
     case "open-edit-part":
       openPartModal(id);
       break;
+    case "take-part":
+      takePartPrompt(id);
+      break;
+    case "take-stock-row":
+      takeStockRowPrompt(id);
+      break;
     case "delete-part":
       deletePart(id);
       break;
@@ -220,6 +271,12 @@ function handleClick(event) {
       break;
     case "remove-stock-row":
       actionTarget.closest(".stock-row-edit")?.remove();
+      break;
+    case "add-alias-row":
+      addAliasEditorRow();
+      break;
+    case "remove-alias-row":
+      actionTarget.closest(".alias-row-edit")?.remove();
       break;
     case "add-category":
       addCategoryPrompt();
@@ -367,6 +424,24 @@ function handleChange(event) {
     return;
   }
 
+  if (target.matches("[data-part-select]")) {
+    const id = Number(target.value);
+    if (target.checked) state.selectedPartIds.add(id);
+    else state.selectedPartIds.delete(id);
+    state.bulkOperationPreview = "";
+    renderPartsViewOnly();
+    return;
+  }
+
+  if (target.matches("[data-select-visible-parts]")) {
+    const ids = filteredParts().slice(0, Number(state.renderLimit || PERFORMANCE_DEFAULTS.renderLimit)).map((part) => part.id);
+    if (target.checked) ids.forEach((id) => state.selectedPartIds.add(id));
+    else ids.forEach((id) => state.selectedPartIds.delete(id));
+    state.bulkOperationPreview = "";
+    renderPartsViewOnly();
+    return;
+  }
+
   if (target.id === "partCategorySelect") {
     const categoryName = getCategoryName(Number(target.value));
     const form = target.closest("form");
@@ -405,6 +480,8 @@ function handleSubmit(event) {
   const handlers = {
     bulkImportForm: () => importBulkParts(),
     partForm: () => savePartFromForm(form),
+    bomRowForm: () => saveBomRowFromForm(form),
+    projectForm: () => saveProjectFromForm(form),
     locationForm: () => saveLocationFromForm(form),
     settingsForm: () => saveSettings(form)
   };
@@ -425,6 +502,193 @@ function handleSubmit(event) {
 function setView(view) {
   state.activeView = normalizeView(view);
   localStorage.setItem(STORAGE.activeView, state.activeView);
+  render();
+}
+
+function selectedPartIdsArray() {
+  const valid = new Set(state.inventory.parts.map((part) => part.id));
+  state.selectedPartIds = new Set([...(state.selectedPartIds || [])].filter((id) => valid.has(id)));
+  return [...state.selectedPartIds];
+}
+
+function selectVisibleParts() {
+  filteredParts().slice(0, Number(state.renderLimit || PERFORMANCE_DEFAULTS.renderLimit)).forEach((part) => state.selectedPartIds.add(part.id));
+  state.bulkOperationPreview = "";
+  renderPartsViewOnly();
+}
+
+function bulkLocationValue(selector, anyAsUndefined = false) {
+  const value = $(selector)?.value || "";
+  if (value === "any") return anyAsUndefined ? undefined : null;
+  if (value === "none" || value === "") return null;
+  return Number(value);
+}
+
+function previewBulkMove() {
+  const ids = selectedPartIdsArray();
+  const fromLocationId = bulkLocationValue("#bulkFromLocation", true);
+  const toLocationId = bulkLocationValue("#bulkToLocation");
+  const qty = integerOrZero($("#bulkMoveQty")?.value);
+  const rows = [];
+  ids.forEach((partId) => {
+    const part = state.inventory.parts.find((item) => item.id === partId);
+    const candidates = stockRowsForPart(partId, fromLocationId).filter((row) => numberOrZero(row.quantity) > 0 && ((row.locationId ?? null) !== (toLocationId ?? null)));
+    let remaining = qty || candidates.reduce((sum, row) => sum + numberOrZero(row.quantity), 0);
+    candidates.forEach((row) => {
+      if (remaining <= 0) return;
+      const moveQty = Math.min(remaining, numberOrZero(row.quantity));
+      remaining -= moveQty;
+      rows.push({ part, row, moveQty });
+    });
+  });
+  state.bulkOperationPreview = rows.length
+    ? `<div class="table-wrap mini-preview"><table class="data-table"><thead><tr><th>Part</th><th>From</th><th>To</th><th>Qty</th></tr></thead><tbody>${rows.slice(0, 40).map((item) => `<tr><td>${escapeHtml(item.part?.name || "")}</td><td>${escapeHtml(item.row.locationId ? locationPath(item.row.locationId) : "no location")}</td><td>${escapeHtml(toLocationId ? locationPath(toLocationId) : "no location")}</td><td>${item.moveQty}</td></tr>`).join("")}</tbody></table></div>${rows.length > 40 ? `<p class="small-note">${rows.length - 40} more movement rows</p>` : ""}`
+    : `<p class="small-note danger-text">No stock rows match that source.</p>`;
+  const target = $("#bulkOperationPreview");
+  if (target) target.innerHTML = state.bulkOperationPreview;
+  else renderPartsViewOnly();
+}
+
+function applyBulkMove() {
+  const ids = selectedPartIdsArray();
+  const fromLocationId = bulkLocationValue("#bulkFromLocation", true);
+  const toLocationId = bulkLocationValue("#bulkToLocation");
+  const qty = integerOrZero($("#bulkMoveQty")?.value);
+  let changed = 0;
+  let moved = 0;
+  for (const partId of ids) {
+    const result = moveStockFromRows(partId, fromLocationId, toLocationId, { all: qty <= 0, quantity: qty, notes: "bulk move" });
+    if (!result.ok && result.error !== "quantity is required") {
+      toast(`move skipped: ${result.error}`, "error");
+      continue;
+    }
+    changed += result.changed;
+    moved += result.quantity;
+  }
+  if (!moved) {
+    toast("nothing moved", "error");
+    return;
+  }
+  logActivity("bulk-move", "stock", null, `${moved} items across ${changed} stock rows`);
+  state.bulkOperationPreview = "";
+  touchInventory();
+  if (!persistDatabase("bulk move applied", { dirty: true })) return;
+  render();
+}
+
+function applyBulkTake() {
+  const ids = selectedPartIdsArray();
+  const locationId = bulkLocationValue("#bulkFromLocation", true);
+  const qty = integerOrZero($("#bulkTakeQty")?.value);
+  if (qty <= 0) {
+    toast("take quantity is required", "error");
+    return;
+  }
+  let taken = 0;
+  for (const partId of ids) {
+    const result = takeStock(partId, { locationId, quantity: qty, notes: "bulk take" });
+    if (!result.ok) {
+      toast(`take skipped: ${result.error}`, "error");
+      continue;
+    }
+    taken += result.quantity;
+  }
+  if (!taken) return;
+  logActivity("bulk-take", "stock", null, `${taken} items taken`);
+  touchInventory();
+  if (!persistDatabase("parts taken", { dirty: true })) return;
+  render();
+}
+
+function applyBulkMin() {
+  const count = setStockRowsMin(selectedPartIdsArray(), $("#bulkMinQty")?.value);
+  if (!count) {
+    toast("no stock rows selected", "error");
+    return;
+  }
+  logActivity("bulk-set-min", "stock", null, `${count} stock rows`);
+  touchInventory();
+  if (!persistDatabase("minimum stock updated", { dirty: true })) return;
+  render();
+}
+
+function applyBulkSource() {
+  const count = setStockRowsSource(selectedPartIdsArray(), $("#bulkSourceText")?.value);
+  if (!count) {
+    toast("no stock rows selected", "error");
+    return;
+  }
+  logActivity("bulk-set-source", "stock", null, `${count} stock rows`);
+  touchInventory();
+  if (!persistDatabase("stock source updated", { dirty: true })) return;
+  render();
+}
+
+function applyBulkPrice() {
+  const count = setStockRowsPrice(selectedPartIdsArray(), $("#bulkUnitPrice")?.value, $("#bulkCurrency")?.value);
+  if (!count) {
+    toast("no stock rows selected", "error");
+    return;
+  }
+  logActivity("bulk-set-price", "stock", null, `${count} stock rows`);
+  touchInventory();
+  if (!persistDatabase("stock price updated", { dirty: true })) return;
+  render();
+}
+
+function takePartPrompt(partId) {
+  const part = state.inventory.parts.find((item) => item.id === Number(partId));
+  if (!part) return;
+  const qty = integerOrZero(prompt(`Take quantity for "${part.name}"`, "1"));
+  if (qty <= 0) return;
+  const result = takeStock(part.id, { quantity: qty, notes: "part row take" });
+  if (!result.ok) {
+    toast(`take failed: ${result.error}`, "error");
+    return;
+  }
+  logActivity("take-part", "part", part.id, `${result.quantity} taken`);
+  touchInventory();
+  if (!persistDatabase("part taken", { dirty: true })) return;
+  render();
+}
+
+function takeStockRowPrompt(stockRowId) {
+  const row = state.inventory.stock.find((item) => item.id === Number(stockRowId));
+  if (!row) return;
+  const part = state.inventory.parts.find((item) => item.id === row.partId);
+  const qty = integerOrZero(prompt(`Take quantity from ${part?.name || "stock row"}`, "1"));
+  if (qty <= 0) return;
+  if (numberOrZero(row.quantity) < qty) {
+    toast(`take failed: only ${numberOrZero(row.quantity)} available`, "error");
+    return;
+  }
+  row.quantity = numberOrZero(row.quantity) - qty;
+  recordStockMovement({ movementType: "take", partId: row.partId, fromLocationId: row.locationId ?? null, quantity: qty, notes: "stock lot take" });
+  logActivity("take-stock-row", "stock", row.id, `${qty} taken`);
+  touchInventory();
+  if (!persistDatabase("stock lot taken", { dirty: true })) return;
+  closeModal();
+  render();
+}
+
+function moveSelectedToLocation(locationId) {
+  const ids = selectedPartIdsArray();
+  if (!ids.length) {
+    toast("select parts in Inventory first", "error");
+    return;
+  }
+  let moved = 0;
+  ids.forEach((partId) => {
+    const result = moveStockFromRows(partId, "any", locationId, { all: true, notes: "move selected from location view" });
+    if (result.ok) moved += result.quantity;
+  });
+  if (!moved) {
+    toast("nothing moved", "error");
+    return;
+  }
+  logActivity("move-selected-here", "location", locationId, `${moved} items moved`);
+  touchInventory();
+  if (!persistDatabase("stock moved to location", { dirty: true })) return;
   render();
 }
 

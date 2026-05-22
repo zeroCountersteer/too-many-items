@@ -2,7 +2,7 @@
 
 const SQLJS_CDN = "https://cdn.jsdelivr.net/npm/sql.js@1.10.3/dist/";
 const BUNDLED_DB_PATH = "data/inventory.db";
-const APP_VERSION = "v19";
+const APP_VERSION = "v20";
 const DEFAULT_THEME_ID = "workbench";
 const DEFAULT_REPO_OWNER = "zeroCountersteer";
 const DEFAULT_REPO_NAME = "too-many-items";
@@ -73,6 +73,7 @@ const PART_COLUMN_DEFS = {
   quantity: "Qty",
   min: "Min",
   location: "Location",
+  price: "Price",
   manufacturer: "Manufacturer",
   mpn: "MPN",
   notes: "Notes",
@@ -1992,6 +1993,24 @@ CREATE TABLE IF NOT EXISTS "project_reservations" (
   FOREIGN KEY("location_id") REFERENCES "locations"("id") ON DELETE SET NULL
 );
 
+CREATE TABLE IF NOT EXISTS "stock_movements" (
+  "id" INTEGER PRIMARY KEY,
+  "movement_type" TEXT NOT NULL CHECK("movement_type" IN ('move', 'take', 'adjust', 'project-consume')),
+  "part_id" INTEGER NOT NULL,
+  "from_location_id" INTEGER,
+  "to_location_id" INTEGER,
+  "quantity" INTEGER NOT NULL DEFAULT 0 CHECK("quantity" >= 0),
+  "project_id" INTEGER,
+  "bom_row_id" INTEGER,
+  "created_at" TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  "notes" TEXT,
+  FOREIGN KEY("part_id") REFERENCES "parts"("id") ON DELETE CASCADE,
+  FOREIGN KEY("from_location_id") REFERENCES "locations"("id") ON DELETE SET NULL,
+  FOREIGN KEY("to_location_id") REFERENCES "locations"("id") ON DELETE SET NULL,
+  FOREIGN KEY("project_id") REFERENCES "projects"("id") ON DELETE SET NULL,
+  FOREIGN KEY("bom_row_id") REFERENCES "project_bom"("id") ON DELETE SET NULL
+);
+
 CREATE TABLE IF NOT EXISTS "activity_log" (
   "id" INTEGER PRIMARY KEY,
   "created_at" TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
@@ -2005,6 +2024,9 @@ CREATE INDEX IF NOT EXISTS "idx_part_aliases_part" ON "part_aliases" ("part_id")
 CREATE INDEX IF NOT EXISTS "idx_part_aliases_value" ON "part_aliases" ("alias_value");
 CREATE INDEX IF NOT EXISTS "idx_project_reservations_project" ON "project_reservations" ("project_id");
 CREATE INDEX IF NOT EXISTS "idx_project_reservations_part" ON "project_reservations" ("part_id");
+CREATE INDEX IF NOT EXISTS "idx_stock_movements_part" ON "stock_movements" ("part_id");
+CREATE INDEX IF NOT EXISTS "idx_stock_movements_created" ON "stock_movements" ("created_at");
+CREATE INDEX IF NOT EXISTS "idx_stock_movements_project" ON "stock_movements" ("project_id");
 CREATE INDEX IF NOT EXISTS "idx_activity_log_created" ON "activity_log" ("created_at");
 `;
 
@@ -2020,6 +2042,7 @@ const PROJECT_COLUMN_DEFS = {
   available: "Available",
   reserved: "Reserved",
   shortage: "Shortage",
+  cost: "Cost",
   fitted: "Fitted",
   actions: ""
 };
