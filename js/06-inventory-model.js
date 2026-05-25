@@ -217,7 +217,7 @@ function getMetrics() {
 function createEmptyInventory() {
   const now = new Date().toISOString();
   return {
-    schemaVersion: 1,
+    schemaVersion: 22,
     meta: {
       app: "too-many-items",
       createdAt: now,
@@ -236,6 +236,10 @@ function createEmptyInventory() {
     attributes: [],
     projects: [],
     projectBom: [],
+    projectSources: [],
+    projectPlacements: [],
+    projectBuildSessions: [],
+    projectBuildSteps: [],
     partAliases: [],
     projectReservations: [],
     stockMovements: [],
@@ -260,6 +264,10 @@ function normalizeInventory(raw) {
   inv.attributes = normalizeAttributes(raw.attributes || []);
   inv.projects = normalizeProjects(raw.projects || []);
   inv.projectBom = normalizeProjectBom(raw.projectBom || raw.project_bom || []);
+  inv.projectSources = normalizeProjectSources(raw.projectSources || raw.project_sources || []);
+  inv.projectPlacements = normalizeProjectPlacements(raw.projectPlacements || raw.project_placements || []);
+  inv.projectBuildSessions = normalizeProjectBuildSessions(raw.projectBuildSessions || raw.project_build_sessions || []);
+  inv.projectBuildSteps = normalizeProjectBuildSteps(raw.projectBuildSteps || raw.project_build_steps || []);
   inv.partAliases = normalizePartAliases(raw.partAliases || raw.part_aliases || []);
   inv.projectReservations = normalizeProjectReservations(raw.projectReservations || raw.project_reservations || []);
   inv.stockMovements = normalizeStockMovements(raw.stockMovements || raw.stock_movements || []);
@@ -270,13 +278,13 @@ function normalizeInventory(raw) {
 }
 
 function ensureInventoryShape(inv) {
-  inv.schemaVersion = inv.schemaVersion || 1;
+  inv.schemaVersion = Math.max(22, Number(inv.schemaVersion || 1));
   inv.meta = inv.meta || {};
   inv.meta.app = inv.meta.app || "too-many-items";
   inv.meta.createdAt = inv.meta.createdAt || new Date().toISOString();
   inv.meta.updatedAt = inv.meta.updatedAt || inv.meta.createdAt;
   inv.meta.defaultCurrency = normalizeCurrency(inv.meta.defaultCurrency || "USD");
-  ["categories", "locations", "parts", "stock", "resistorSpecs", "capacitorSpecs", "inductorSpecs", "icSpecs", "keyswitchSpecs", "attributes", "projects", "projectBom", "partAliases", "projectReservations", "stockMovements", "activityLog"].forEach((key) => {
+  ["categories", "locations", "parts", "stock", "resistorSpecs", "capacitorSpecs", "inductorSpecs", "icSpecs", "keyswitchSpecs", "attributes", "projects", "projectBom", "projectSources", "projectPlacements", "projectBuildSessions", "projectBuildSteps", "partAliases", "projectReservations", "stockMovements", "activityLog"].forEach((key) => {
     if (!Array.isArray(inv[key])) inv[key] = [];
   });
   if (!inv.categories.length) inv.categories = DEFAULT_CATEGORIES.map((name, index) => ({ id: index + 1, name }));
@@ -313,6 +321,20 @@ function normalizeReferences(inv) {
   inv.projectBom.forEach((row) => {
     if (row.partId !== null && row.partId !== undefined && !partIds.has(row.partId)) row.partId = null;
   });
+  const bomRowIds = new Set((inv.projectBom || []).map((row) => row.id));
+  inv.projectSources = (inv.projectSources || []).filter((row) => projectIds.has(row.projectId));
+  inv.projectPlacements = (inv.projectPlacements || []).filter((row) => projectIds.has(row.projectId));
+  inv.projectPlacements.forEach((row) => {
+    if (row.bomRowId !== null && row.bomRowId !== undefined && !bomRowIds.has(row.bomRowId)) row.bomRowId = null;
+  });
+  const placementIds = new Set((inv.projectPlacements || []).map((row) => row.id));
+  inv.projectBuildSessions = (inv.projectBuildSessions || []).filter((row) => projectIds.has(row.projectId));
+  const sessionIds = new Set((inv.projectBuildSessions || []).map((row) => row.id));
+  inv.projectBuildSteps = (inv.projectBuildSteps || []).filter((row) => projectIds.has(row.projectId) && sessionIds.has(row.sessionId));
+  inv.projectBuildSteps.forEach((row) => {
+    if (row.placementId !== null && row.placementId !== undefined && !placementIds.has(row.placementId)) row.placementId = null;
+    if (row.bomRowId !== null && row.bomRowId !== undefined && !bomRowIds.has(row.bomRowId)) row.bomRowId = null;
+  });
   inv.partAliases = inv.partAliases.filter((row) => partIds.has(row.partId));
   inv.projectReservations = inv.projectReservations.filter((row) => projectIds.has(row.projectId) && partIds.has(row.partId));
   inv.projectReservations.forEach((row) => {
@@ -323,7 +345,9 @@ function normalizeReferences(inv) {
     if (row.fromLocationId !== null && row.fromLocationId !== undefined && !locationIds.has(row.fromLocationId)) row.fromLocationId = null;
     if (row.toLocationId !== null && row.toLocationId !== undefined && !locationIds.has(row.toLocationId)) row.toLocationId = null;
     if (row.projectId !== null && row.projectId !== undefined && !projectIds.has(row.projectId)) row.projectId = null;
-    if (row.bomRowId !== null && row.bomRowId !== undefined && !(inv.projectBom || []).some((bom) => bom.id === row.bomRowId)) row.bomRowId = null;
+    if (row.bomRowId !== null && row.bomRowId !== undefined && !bomRowIds.has(row.bomRowId)) row.bomRowId = null;
+    if (row.buildSessionId !== null && row.buildSessionId !== undefined && !sessionIds.has(row.buildSessionId)) row.buildSessionId = null;
+    if (row.placementId !== null && row.placementId !== undefined && !placementIds.has(row.placementId)) row.placementId = null;
   });
 }
 
@@ -427,6 +451,9 @@ function validateInventory(inv) {
   const partIds = new Set(inv.parts.map((part) => part.id));
   const locationIds = new Set(inv.locations.map((location) => location.id));
   const projectIds = new Set((inv.projects || []).map((project) => project.id));
+  const bomRowIds = new Set((inv.projectBom || []).map((row) => row.id));
+  const placementIds = new Set((inv.projectPlacements || []).map((row) => row.id));
+  const sessionIds = new Set((inv.projectBuildSessions || []).map((row) => row.id));
 
   inv.parts.forEach((part) => {
     if (!part.name) errors.push(`part ${part.id} has no name`);
@@ -465,6 +492,32 @@ function validateInventory(inv) {
     if (row.quantity < 0) errors.push(`BOM row ${row.id} has negative quantity`);
   });
 
+  (inv.projectSources || []).forEach((row) => {
+    if (!projectIds.has(row.projectId)) errors.push(`project source ${row.id} references missing project ${row.projectId}`);
+    if (!row.fileName) errors.push(`project source ${row.id} has no file name`);
+  });
+
+  (inv.projectPlacements || []).forEach((row) => {
+    if (!projectIds.has(row.projectId)) errors.push(`placement ${row.id} references missing project ${row.projectId}`);
+    if (row.bomRowId !== null && row.bomRowId !== undefined && !bomRowIds.has(row.bomRowId)) errors.push(`placement ${row.id} references missing BOM row ${row.bomRowId}`);
+    if (!row.reference) errors.push(`placement ${row.id} has no reference`);
+  });
+
+  (inv.projectBuildSessions || []).forEach((row) => {
+    if (!projectIds.has(row.projectId)) errors.push(`build session ${row.id} references missing project ${row.projectId}`);
+    if (!row.name) errors.push(`build session ${row.id} has no name`);
+    if (row.buildQuantity < 0) errors.push(`build session ${row.id} has negative build quantity`);
+  });
+
+  (inv.projectBuildSteps || []).forEach((row) => {
+    if (!sessionIds.has(row.sessionId)) errors.push(`build step ${row.id} references missing session ${row.sessionId}`);
+    if (!projectIds.has(row.projectId)) errors.push(`build step ${row.id} references missing project ${row.projectId}`);
+    if (row.placementId !== null && row.placementId !== undefined && !placementIds.has(row.placementId)) errors.push(`build step ${row.id} references missing placement ${row.placementId}`);
+    if (row.bomRowId !== null && row.bomRowId !== undefined && !bomRowIds.has(row.bomRowId)) errors.push(`build step ${row.id} references missing BOM row ${row.bomRowId}`);
+    if (!["pending", "done", "skipped"].includes(row.status || "pending")) errors.push(`build step ${row.id} has invalid status ${row.status}`);
+    if (row.takenQuantity < 0) errors.push(`build step ${row.id} has negative taken quantity`);
+  });
+
   (inv.partAliases || []).forEach((row) => {
     if (!partIds.has(row.partId)) errors.push(`part alias ${row.id} references missing part ${row.partId}`);
     if (!row.aliasValue) errors.push(`part alias ${row.id} has no value`);
@@ -483,7 +536,9 @@ function validateInventory(inv) {
     if (row.fromLocationId !== null && row.fromLocationId !== undefined && !locationIds.has(row.fromLocationId)) errors.push(`stock movement ${row.id} references missing source location ${row.fromLocationId}`);
     if (row.toLocationId !== null && row.toLocationId !== undefined && !locationIds.has(row.toLocationId)) errors.push(`stock movement ${row.id} references missing destination location ${row.toLocationId}`);
     if (row.projectId !== null && row.projectId !== undefined && !projectIds.has(row.projectId)) errors.push(`stock movement ${row.id} references missing project ${row.projectId}`);
-    if (row.bomRowId !== null && row.bomRowId !== undefined && !(inv.projectBom || []).some((bom) => bom.id === row.bomRowId)) errors.push(`stock movement ${row.id} references missing BOM row ${row.bomRowId}`);
+    if (row.bomRowId !== null && row.bomRowId !== undefined && !bomRowIds.has(row.bomRowId)) errors.push(`stock movement ${row.id} references missing BOM row ${row.bomRowId}`);
+    if (row.buildSessionId !== null && row.buildSessionId !== undefined && !sessionIds.has(row.buildSessionId)) errors.push(`stock movement ${row.id} references missing build session ${row.buildSessionId}`);
+    if (row.placementId !== null && row.placementId !== undefined && !placementIds.has(row.placementId)) errors.push(`stock movement ${row.id} references missing placement ${row.placementId}`);
     if (row.quantity < 0) errors.push(`stock movement ${row.id} has negative quantity`);
   });
 
@@ -689,6 +744,11 @@ function normalizeProjects(rows) {
     name: textValue(row.name) || "project",
     revision: nullableText(row.revision),
     sourceFile: nullableText(row.sourceFile ?? row.source_file),
+    status: nullableText(row.status) || "active",
+    targetQuantity: integerOrZero(row.targetQuantity ?? row.target_quantity) || 1,
+    dueDate: nullableText(row.dueDate ?? row.due_date),
+    owner: nullableText(row.owner),
+    tags: nullableText(Array.isArray(row.tags) ? row.tags.join(", ") : row.tags),
     createdAt: row.createdAt || row.created_at || new Date().toISOString(),
     updatedAt: row.updatedAt || row.updated_at || null,
     notes: nullableText(row.notes)
@@ -708,6 +768,68 @@ function normalizeProjectBom(rows) {
     fitted: row.fitted === 0 ? 0 : 1,
     notes: nullableText(row.notes)
   })).filter((row) => row.id > 0 && row.projectId > 0);
+}
+
+function normalizeProjectSources(rows) {
+  return (rows || []).map((row) => ({
+    id: integerOrZero(row.id),
+    projectId: integerOrZero(row.projectId ?? row.project_id),
+    fileName: textValue(row.fileName ?? row.file_name),
+    fileType: nullableText(row.fileType ?? row.file_type),
+    fileHash: nullableText(row.fileHash ?? row.file_hash),
+    importedAt: row.importedAt || row.imported_at || new Date().toISOString(),
+    parserVersion: nullableText(row.parserVersion ?? row.parser_version),
+    notes: nullableText(row.notes)
+  })).filter((row) => row.id > 0 && row.projectId > 0 && row.fileName);
+}
+
+function normalizeProjectPlacements(rows) {
+  return (rows || []).map((row) => ({
+    id: integerOrZero(row.id),
+    projectId: integerOrZero(row.projectId ?? row.project_id),
+    bomRowId: nullableNumber(row.bomRowId ?? row.bom_row_id),
+    reference: textValue(row.reference ?? row.ref),
+    sourceUuid: nullableText(row.sourceUuid ?? row.source_uuid),
+    side: ["top", "bottom", "unknown"].includes(textValue(row.side)) ? textValue(row.side) : "unknown",
+    xMm: nullableNumber(row.xMm ?? row.x_mm),
+    yMm: nullableNumber(row.yMm ?? row.y_mm),
+    rotation: nullableNumber(row.rotation),
+    value: nullableText(row.value),
+    footprint: nullableText(row.footprint),
+    mpn: nullableText(row.mpn),
+    manufacturer: nullableText(row.manufacturer),
+    dnp: row.dnp === 1 || row.dnp === true ? 1 : 0,
+    boundingJson: nullableText(row.boundingJson ?? row.bounding_json),
+    notes: nullableText(row.notes)
+  })).filter((row) => row.id > 0 && row.projectId > 0 && row.reference);
+}
+
+function normalizeProjectBuildSessions(rows) {
+  return (rows || []).map((row) => ({
+    id: integerOrZero(row.id),
+    projectId: integerOrZero(row.projectId ?? row.project_id),
+    name: textValue(row.name) || "build session",
+    status: nullableText(row.status) || "active",
+    buildQuantity: integerOrZero(row.buildQuantity ?? row.build_quantity) || 1,
+    createdAt: row.createdAt || row.created_at || new Date().toISOString(),
+    updatedAt: row.updatedAt || row.updated_at || null,
+    notes: nullableText(row.notes)
+  })).filter((row) => row.id > 0 && row.projectId > 0);
+}
+
+function normalizeProjectBuildSteps(rows) {
+  return (rows || []).map((row) => ({
+    id: integerOrZero(row.id),
+    sessionId: integerOrZero(row.sessionId ?? row.session_id),
+    projectId: integerOrZero(row.projectId ?? row.project_id),
+    placementId: nullableNumber(row.placementId ?? row.placement_id),
+    bomRowId: nullableNumber(row.bomRowId ?? row.bom_row_id),
+    reference: textValue(row.reference ?? row.ref),
+    status: ["pending", "done", "skipped"].includes(textValue(row.status)) ? textValue(row.status) : "pending",
+    takenQuantity: integerOrZero(row.takenQuantity ?? row.taken_quantity),
+    completedAt: row.completedAt || row.completed_at || null,
+    notes: nullableText(row.notes)
+  })).filter((row) => row.id > 0 && row.sessionId > 0 && row.projectId > 0 && row.reference);
 }
 
 function saveVisibleColumns() {
@@ -830,6 +952,8 @@ function normalizeStockMovements(rows) {
       quantity: integerOrZero(row.quantity),
       projectId: nullableNumber(row.projectId ?? row.project_id),
       bomRowId: nullableNumber(row.bomRowId ?? row.bom_row_id),
+      buildSessionId: nullableNumber(row.buildSessionId ?? row.build_session_id),
+      placementId: nullableNumber(row.placementId ?? row.placement_id),
       createdAt: row.createdAt || row.created_at || new Date().toISOString(),
       notes: nullableText(row.notes)
     };
@@ -893,6 +1017,8 @@ function recordStockMovement(input) {
     quantity,
     projectId: input.projectId === undefined ? null : nullableNumber(input.projectId),
     bomRowId: input.bomRowId === undefined ? null : nullableNumber(input.bomRowId),
+    buildSessionId: input.buildSessionId === undefined ? null : nullableNumber(input.buildSessionId),
+    placementId: input.placementId === undefined ? null : nullableNumber(input.placementId),
     createdAt: input.createdAt || new Date().toISOString(),
     notes: nullableText(input.notes)
   };
@@ -1018,6 +1144,8 @@ function takeStock(partId, options = {}) {
       quantity: qty,
       projectId: options.projectId ?? null,
       bomRowId: options.bomRowId ?? null,
+      buildSessionId: options.buildSessionId ?? null,
+      placementId: options.placementId ?? null,
       notes: options.notes || null
     });
   }
@@ -1205,6 +1333,10 @@ function deleteProject(projectId) {
   if (!confirm(`Delete project "${project.name}" and its BOM?`)) return;
   state.inventory.projects = state.inventory.projects.filter((item) => item.id !== project.id);
   state.inventory.projectBom = state.inventory.projectBom.filter((row) => row.projectId !== project.id);
+  state.inventory.projectSources = (state.inventory.projectSources || []).filter((row) => row.projectId !== project.id);
+  state.inventory.projectPlacements = (state.inventory.projectPlacements || []).filter((row) => row.projectId !== project.id);
+  state.inventory.projectBuildSessions = (state.inventory.projectBuildSessions || []).filter((row) => row.projectId !== project.id);
+  state.inventory.projectBuildSteps = (state.inventory.projectBuildSteps || []).filter((row) => row.projectId !== project.id);
   state.inventory.projectReservations = state.inventory.projectReservations.filter((row) => row.projectId !== project.id);
   logActivity("delete-project", "project", project.id, project.name);
   touchInventory();
@@ -1243,6 +1375,12 @@ function deleteBomRow(rowId) {
   const row = state.inventory.projectBom.find((item) => item.id === Number(rowId));
   if (!row) return;
   state.inventory.projectBom = state.inventory.projectBom.filter((item) => item.id !== row.id);
+  (state.inventory.projectPlacements || []).forEach((placement) => {
+    if (placement.bomRowId === row.id) placement.bomRowId = null;
+  });
+  (state.inventory.projectBuildSteps || []).forEach((step) => {
+    if (step.bomRowId === row.id) step.bomRowId = null;
+  });
   touchInventory();
   if (!persistDatabase("BOM row deleted", { dirty: true })) return;
   render();
@@ -1416,6 +1554,10 @@ Object.assign(window, {
   highlightLocation,
   normalizeProjects,
   normalizeProjectBom,
+  normalizeProjectSources,
+  normalizeProjectPlacements,
+  normalizeProjectBuildSessions,
+  normalizeProjectBuildSteps,
   normalizePartAliases,
   normalizeProjectReservations,
   normalizeActivityLog,

@@ -17,7 +17,13 @@ const state = {
   bulkOperationPreview: "",
   visibleColumns: loadJsonFromStorage(STORAGE.visibleColumns || "tmi.visibleColumns", DEFAULT_PART_COLUMNS),
   activeProjectId: Number(localStorage.getItem(STORAGE.activeProjectId || "tmi.activeProjectId") || 0),
+  activeProjectTab: "overview",
+  activeBuildSessionId: 0,
+  projectSideFilter: "both",
   projectQuery: "",
+  editorTable: "parts",
+  editorSelection: new Set(),
+  editorValidationHtml: "",
   renderLimit: Number(localStorage.getItem(STORAGE.renderLimit || "tmi.renderLimit") || PERFORMANCE_DEFAULTS.renderLimit),
   sortKey: "category",
   sortDir: "asc",
@@ -123,6 +129,70 @@ function handleClick(event) {
       break;
     case "preview-bom-import":
       previewBomImport();
+      break;
+    case "project-tab":
+      state.activeProjectTab = actionTarget.dataset.tab || "overview";
+      render();
+      break;
+    case "preview-kicad-source":
+      previewKiCadSourceFromForm();
+      break;
+    case "import-kicad-source":
+      importKiCadSourceFromForm();
+      break;
+    case "create-build-session":
+      createBuildSession(id);
+      break;
+    case "mark-placement-done":
+      setPlacementStatus(id, "done");
+      break;
+    case "mark-placement-skipped":
+      setPlacementStatus(id, "skipped");
+      break;
+    case "mark-placement-pending":
+      setPlacementStatus(id, "pending");
+      break;
+    case "take-placement":
+      takePlacementStock(id);
+      break;
+    case "editor-table":
+      state.editorTable = actionTarget.dataset.table || "parts";
+      state.editorSelection = new Set();
+      state.editorValidationHtml = "";
+      render();
+      break;
+    case "editor-add-row":
+      addEditorRow();
+      break;
+    case "editor-delete-selected":
+      deleteSelectedEditorRows();
+      break;
+    case "editor-paste-tsv":
+      pasteEditorTsv();
+      break;
+    case "editor-validate":
+      validateEditorDraft();
+      break;
+    case "editor-apply":
+      applyEditorDraft();
+      break;
+    case "editor-batch-category":
+      editorBatchSet("category");
+      break;
+    case "editor-batch-location":
+      editorBatchSet("location");
+      break;
+    case "editor-batch-price":
+      editorBatchSet("price");
+      break;
+    case "editor-batch-fitted":
+      editorBatchSet("fitted");
+      break;
+    case "editor-batch-match":
+      editorBatchSet("match");
+      break;
+    case "editor-batch-auto-match":
+      editorBatchSet("auto-match");
       break;
     case "select-visible-parts":
       selectVisibleParts();
@@ -444,6 +514,25 @@ function handleChange(event) {
 
   if (target.matches("[data-bom-map]")) {
     previewBomImport();
+    return;
+  }
+
+  if (target.matches("[data-build-session-select]")) {
+    state.activeBuildSessionId = Number(target.value || 0);
+    if (state.activeView === "projects") $("#viewPanel").innerHTML = renderProjectsView();
+    return;
+  }
+
+  if (target.matches("[data-project-side-filter]")) {
+    state.projectSideFilter = target.value || "both";
+    if (state.activeView === "projects") $("#viewPanel").innerHTML = renderProjectsView();
+    return;
+  }
+
+  if (target.matches("[data-editor-select-all]")) {
+    $$("[data-editor-select]").forEach((input) => {
+      input.checked = target.checked;
+    });
     return;
   }
 

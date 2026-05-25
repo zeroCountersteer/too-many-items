@@ -1,0 +1,17 @@
+(kicad_pcb
+  (version 20221018)
+  (generator "too-many-items-smoke")
+  (gr_rect (start 0 0) (end 40 30) (layer "Edge.Cuts") (width 0.1))
+  (footprint "Resistor_SMD:R_0603_1608Metric"
+    (layer "F.Cu")
+    (at 10 10 90)
+    (property "Reference" "R1")
+    (property "Value" "10k")
+    (uuid "pcb-r1"))
+  (footprint "Capacitor_SMD:C_0603_1608Metric"
+    (layer "B.Cu")
+    (at 24 16 180)
+    (property "Reference" "C1")
+    (property "Value" "100nF")
+    (uuid "pcb-c1"))
+)

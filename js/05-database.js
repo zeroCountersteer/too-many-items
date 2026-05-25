@@ -260,6 +260,11 @@ function databaseToInventory(db) {
       name: "name",
       revision: "revision",
       sourceFile: "source_file",
+      status: "status",
+      targetQuantity: "target_quantity",
+      dueDate: "due_date",
+      owner: "owner",
+      tags: "tags",
       createdAt: "created_at",
       updatedAt: "updated_at",
       notes: "notes"
@@ -276,6 +281,56 @@ function databaseToInventory(db) {
       fitted: "fitted",
       notes: "notes"
     }, "ORDER BY \"project_id\", \"id\""),
+    projectSources: selectTable(db, "project_sources", {
+      id: "id",
+      projectId: "project_id",
+      fileName: "file_name",
+      fileType: "file_type",
+      fileHash: "file_hash",
+      importedAt: "imported_at",
+      parserVersion: "parser_version",
+      notes: "notes"
+    }, "ORDER BY \"project_id\", \"id\""),
+    projectPlacements: selectTable(db, "project_placements", {
+      id: "id",
+      projectId: "project_id",
+      bomRowId: "bom_row_id",
+      reference: "reference",
+      sourceUuid: "source_uuid",
+      side: "side",
+      xMm: "x_mm",
+      yMm: "y_mm",
+      rotation: "rotation",
+      value: "value",
+      footprint: "footprint",
+      mpn: "mpn",
+      manufacturer: "manufacturer",
+      dnp: "dnp",
+      boundingJson: "bounding_json",
+      notes: "notes"
+    }, "ORDER BY \"project_id\", \"reference\""),
+    projectBuildSessions: selectTable(db, "project_build_sessions", {
+      id: "id",
+      projectId: "project_id",
+      name: "name",
+      status: "status",
+      buildQuantity: "build_quantity",
+      createdAt: "created_at",
+      updatedAt: "updated_at",
+      notes: "notes"
+    }, "ORDER BY \"project_id\", \"id\""),
+    projectBuildSteps: selectTable(db, "project_build_steps", {
+      id: "id",
+      sessionId: "session_id",
+      projectId: "project_id",
+      placementId: "placement_id",
+      bomRowId: "bom_row_id",
+      reference: "reference",
+      status: "status",
+      takenQuantity: "taken_quantity",
+      completedAt: "completed_at",
+      notes: "notes"
+    }, "ORDER BY \"project_id\", \"session_id\", \"reference\""),
     partAliases: selectTable(db, "part_aliases", {
       id: "id",
       partId: "part_id",
@@ -301,6 +356,8 @@ function databaseToInventory(db) {
       quantity: "quantity",
       projectId: "project_id",
       bomRowId: "bom_row_id",
+      buildSessionId: "build_session_id",
+      placementId: "placement_id",
       createdAt: "created_at",
       notes: "notes"
     }, "ORDER BY \"id\" DESC"),
@@ -426,11 +483,16 @@ function inventoryToDatabaseBytes(inventory) {
     });
 
     (inv.projects || []).forEach((row) => {
-      db.run(`INSERT INTO "projects" ("id", "name", "revision", "source_file", "created_at", "updated_at", "notes") VALUES (?, ?, ?, ?, ?, ?, ?)`, [
+      db.run(`INSERT INTO "projects" ("id", "name", "revision", "source_file", "status", "target_quantity", "due_date", "owner", "tags", "created_at", "updated_at", "notes") VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`, [
         row.id,
         row.name,
         sqlValue(row.revision),
         sqlValue(row.sourceFile),
+        sqlValue(row.status || "active"),
+        integerOrZero(row.targetQuantity || 1),
+        sqlValue(row.dueDate),
+        sqlValue(row.owner),
+        sqlValue(row.tags),
         row.createdAt || new Date().toISOString(),
         sqlValue(row.updatedAt),
         sqlValue(row.notes)
@@ -448,6 +510,68 @@ function inventoryToDatabaseBytes(inventory) {
         sqlValue(row.referencesText),
         integerOrZero(row.quantity),
         row.fitted === 0 ? 0 : 1,
+        sqlValue(row.notes)
+      ]);
+    });
+
+    (inv.projectSources || []).forEach((row) => {
+      db.run(`INSERT INTO "project_sources" ("id", "project_id", "file_name", "file_type", "file_hash", "imported_at", "parser_version", "notes") VALUES (?, ?, ?, ?, ?, ?, ?, ?)`, [
+        row.id,
+        row.projectId,
+        row.fileName,
+        sqlValue(row.fileType),
+        sqlValue(row.fileHash),
+        row.importedAt || new Date().toISOString(),
+        sqlValue(row.parserVersion),
+        sqlValue(row.notes)
+      ]);
+    });
+
+    (inv.projectPlacements || []).forEach((row) => {
+      db.run(`INSERT INTO "project_placements" ("id", "project_id", "bom_row_id", "reference", "source_uuid", "side", "x_mm", "y_mm", "rotation", "value", "footprint", "mpn", "manufacturer", "dnp", "bounding_json", "notes") VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`, [
+        row.id,
+        row.projectId,
+        sqlValue(row.bomRowId),
+        row.reference,
+        sqlValue(row.sourceUuid),
+        sqlValue(row.side || "unknown"),
+        sqlValue(row.xMm),
+        sqlValue(row.yMm),
+        sqlValue(row.rotation),
+        sqlValue(row.value),
+        sqlValue(row.footprint),
+        sqlValue(row.mpn),
+        sqlValue(row.manufacturer),
+        row.dnp === 1 ? 1 : 0,
+        sqlValue(row.boundingJson),
+        sqlValue(row.notes)
+      ]);
+    });
+
+    (inv.projectBuildSessions || []).forEach((row) => {
+      db.run(`INSERT INTO "project_build_sessions" ("id", "project_id", "name", "status", "build_quantity", "created_at", "updated_at", "notes") VALUES (?, ?, ?, ?, ?, ?, ?, ?)`, [
+        row.id,
+        row.projectId,
+        row.name,
+        sqlValue(row.status || "active"),
+        integerOrZero(row.buildQuantity || 1),
+        row.createdAt || new Date().toISOString(),
+        sqlValue(row.updatedAt),
+        sqlValue(row.notes)
+      ]);
+    });
+
+    (inv.projectBuildSteps || []).forEach((row) => {
+      db.run(`INSERT INTO "project_build_steps" ("id", "session_id", "project_id", "placement_id", "bom_row_id", "reference", "status", "taken_quantity", "completed_at", "notes") VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`, [
+        row.id,
+        row.sessionId,
+        row.projectId,
+        sqlValue(row.placementId),
+        sqlValue(row.bomRowId),
+        row.reference,
+        sqlValue(row.status || "pending"),
+        integerOrZero(row.takenQuantity),
+        sqlValue(row.completedAt),
         sqlValue(row.notes)
       ]);
     });
@@ -475,7 +599,7 @@ function inventoryToDatabaseBytes(inventory) {
     });
 
     (inv.stockMovements || []).forEach((row) => {
-      db.run(`INSERT INTO "stock_movements" ("id", "movement_type", "part_id", "from_location_id", "to_location_id", "quantity", "project_id", "bom_row_id", "created_at", "notes") VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`, [
+      db.run(`INSERT INTO "stock_movements" ("id", "movement_type", "part_id", "from_location_id", "to_location_id", "quantity", "project_id", "bom_row_id", "build_session_id", "placement_id", "created_at", "notes") VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`, [
         row.id,
         row.movementType,
         row.partId,
@@ -484,6 +608,8 @@ function inventoryToDatabaseBytes(inventory) {
         integerOrZero(row.quantity),
         sqlValue(row.projectId),
         sqlValue(row.bomRowId),
+        sqlValue(row.buildSessionId),
+        sqlValue(row.placementId),
         row.createdAt || new Date().toISOString(),
         sqlValue(row.notes)
       ]);

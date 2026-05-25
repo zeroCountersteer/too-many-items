@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>zeroCountersteer Inventory</title>
   <meta name="description" content="Static GitHub-backed SQLite inventory." />
-  <link rel="stylesheet" href="style.css?v=21" />
+  <link rel="stylesheet" href="style.css?v=22" />
 </head>
 <body class="no-motion" data-app-ready="false">
   <div class="app-shell">
@@ -21,7 +21,8 @@
         <button type="button" class="nav-button" data-view="parts">Inventory</button>
         <button type="button" class="nav-button" data-view="add">Add</button>
         <button type="button" class="nav-button" data-view="locations">Locations</button>
-        <button type="button" class="nav-button" data-view="projects">Projects / BOM</button>
+        <button type="button" class="nav-button" data-view="projects">Projects</button>
+        <button type="button" class="nav-button" data-view="editor">Editor</button>
         <button type="button" class="nav-button" data-view="database">Stats / DB</button>
         <button type="button" class="nav-button" data-view="settings">Settings</button>
       </nav>
@@ -59,14 +60,15 @@
   </noscript>
 
   <script src="https://cdn.jsdelivr.net/npm/sql.js@1.10.3/dist/sql-wasm.js"></script>
-  <script src="js/00-config.js?v=21"></script>
-  <script src="js/06-inventory-model.js?v=21"></script>
-  <script src="js/05-database.js?v=21"></script>
-  <script src="js/07-theme-utils.js?v=21"></script>
-  <script src="js/02-render.js?v=21"></script>
-  <script src="js/04-editors.js?v=21"></script>
-  <script src="js/03-bulk-and-api.js?v=21"></script>
-  <script src="js/01-core-events.js?v=21"></script>
+  <script src="js/00-config.js?v=22"></script>
+  <script src="js/06-inventory-model.js?v=22"></script>
+  <script src="js/05-database.js?v=22"></script>
+  <script src="js/07-theme-utils.js?v=22"></script>
+  <script src="js/02-render.js?v=22"></script>
+  <script src="js/04-editors.js?v=22"></script>
+  <script src="js/03-bulk-and-api.js?v=22"></script>
+  <script src="js/08-project-editor.js?v=22"></script>
+  <script src="js/01-core-events.js?v=22"></script>
   <script>if ("serviceWorker" in navigator) { window.addEventListener("load", () => navigator.serviceWorker.register("./sw.js").catch(console.warn)); }</script>
 </body>
 </html>

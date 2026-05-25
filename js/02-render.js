@@ -17,6 +17,7 @@ function render() {
     add: renderAddImportView,
     locations: renderLocationsView,
     projects: renderProjectsView,
+    editor: renderAdvancedEditorView,
     database: renderDatabaseView,
     settings: renderSettingsView
   };
@@ -33,7 +34,8 @@ function renderHeader() {
     parts: ["inventory / parts", "Parts"],
     add: ["inventory / add", "Bulk Add"],
     locations: ["inventory / storage", "Locations"],
-    projects: ["inventory / projects", "Projects / BOM"],
+    projects: ["inventory / projects", "Projects"],
+    editor: ["inventory / editor", "Advanced Editor"],
     database: ["inventory / database", "Stats / DB"],
     settings: [owner, "Settings"]
   };
@@ -565,6 +567,7 @@ function renderBulkLine(index, row = {}) {
 }
 
 function renderProjectsView() {
+  if (typeof renderProjectManagerView === "function") return renderProjectManagerView();
   const projects = state.inventory.projects || [];
   const project = activeProject();
   const list = projects.length

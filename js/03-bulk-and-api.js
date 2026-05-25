@@ -532,6 +532,11 @@ function importKiCadBomFromForm() {
       name: textValue(fd.get("projectName")) || "Imported project",
       revision: nullableText(fd.get("revision")),
       sourceFile: `pasted ${parsed.delimiter === "\t" ? "TSV" : "CSV"} BOM`,
+      status: "active",
+      targetQuantity: 1,
+      dueDate: null,
+      owner: null,
+      tags: null,
       createdAt: now,
       updatedAt: now,
       notes: null

@@ -514,6 +514,11 @@ function openProjectDrawer(projectId) {
       <div class="form-grid">
         <div class="field span-2"><label>name</label><input name="name" required value="${escapeAttr(project.name || "")}" /></div>
         <div class="field"><label>revision</label><input name="revision" value="${escapeAttr(project.revision || "")}" /></div>
+        <div class="field"><label>status</label><input name="status" value="${escapeAttr(project.status || "active")}" /></div>
+        <div class="field"><label>target qty</label><input name="targetQuantity" type="number" min="0" step="1" value="${escapeAttr(project.targetQuantity || 1)}" /></div>
+        <div class="field"><label>due date</label><input name="dueDate" type="date" value="${escapeAttr(project.dueDate || "")}" /></div>
+        <div class="field"><label>owner</label><input name="owner" value="${escapeAttr(project.owner || "")}" /></div>
+        <div class="field span-2"><label>tags</label><input name="tags" value="${escapeAttr(project.tags || "")}" placeholder="keyboard, prototype, client" /></div>
         <div class="field"><label>source file</label><input name="sourceFile" value="${escapeAttr(project.sourceFile || "")}" /></div>
         <div class="field span-2"><label>notes</label><textarea name="notes">${escapeHtml(project.notes || "")}</textarea></div>
       </div>
@@ -531,6 +536,11 @@ function saveProjectFromForm(form) {
   if (!project) return;
   project.name = textValue(fd.get("name")) || project.name;
   project.revision = nullableText(fd.get("revision"));
+  project.status = nullableText(fd.get("status")) || "active";
+  project.targetQuantity = integerOrZero(fd.get("targetQuantity")) || 1;
+  project.dueDate = nullableText(fd.get("dueDate"));
+  project.owner = nullableText(fd.get("owner"));
+  project.tags = nullableText(fd.get("tags"));
   project.sourceFile = nullableText(fd.get("sourceFile"));
   project.notes = nullableText(fd.get("notes"));
   project.updatedAt = new Date().toISOString();

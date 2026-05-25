@@ -1,0 +1,18 @@
+(kicad_sch
+  (version 20230121)
+  (generator "too-many-items-smoke")
+  (symbol
+    (lib_id "Device:R")
+    (at 10 10 0)
+    (uuid "sch-r1")
+    (property "Reference" "R1")
+    (property "Value" "10k")
+    (property "Footprint" "R_0603_1608Metric"))
+  (symbol
+    (lib_id "Device:C")
+    (at 24 16 0)
+    (uuid "sch-c1")
+    (property "Reference" "C1")
+    (property "Value" "100nF")
+    (property "Footprint" "C_0603_1608Metric"))
+)

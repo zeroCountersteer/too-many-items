@@ -2,11 +2,11 @@
 
 const SQLJS_CDN = "https://cdn.jsdelivr.net/npm/sql.js@1.10.3/dist/";
 const BUNDLED_DB_PATH = "data/inventory.db";
-const APP_VERSION = "v21";
+const APP_VERSION = "v22";
 const DEFAULT_THEME_ID = "workbench";
 const DEFAULT_REPO_OWNER = "zeroCountersteer";
 const DEFAULT_REPO_NAME = "too-many-items";
-const VALID_VIEWS = new Set(["parts", "add", "locations", "projects", "database", "settings"]);
+const VALID_VIEWS = new Set(["parts", "add", "locations", "projects", "editor", "database", "settings"]);
 
 const STORAGE = {
   dbBase64: "tmi.v3.database.base64",
@@ -1944,6 +1944,11 @@ CREATE TABLE IF NOT EXISTS "projects" (
   "name" TEXT NOT NULL,
   "revision" TEXT,
   "source_file" TEXT,
+  "status" TEXT DEFAULT 'active',
+  "target_quantity" INTEGER NOT NULL DEFAULT 1 CHECK("target_quantity" >= 0),
+  "due_date" TEXT,
+  "owner" TEXT,
+  "tags" TEXT,
   "created_at" TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
   "updated_at" TEXT,
   "notes" TEXT
@@ -1969,6 +1974,74 @@ CREATE INDEX IF NOT EXISTS "idx_locations_type" ON "locations" ("type");
 CREATE INDEX IF NOT EXISTS "idx_project_bom_project" ON "project_bom" ("project_id");
 CREATE INDEX IF NOT EXISTS "idx_project_bom_part" ON "project_bom" ("part_id");
 
+CREATE TABLE IF NOT EXISTS "project_sources" (
+  "id" INTEGER PRIMARY KEY,
+  "project_id" INTEGER NOT NULL,
+  "file_name" TEXT NOT NULL,
+  "file_type" TEXT,
+  "file_hash" TEXT,
+  "imported_at" TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  "parser_version" TEXT,
+  "notes" TEXT,
+  FOREIGN KEY("project_id") REFERENCES "projects"("id") ON DELETE CASCADE
+);
+
+CREATE TABLE IF NOT EXISTS "project_placements" (
+  "id" INTEGER PRIMARY KEY,
+  "project_id" INTEGER NOT NULL,
+  "bom_row_id" INTEGER,
+  "reference" TEXT NOT NULL,
+  "source_uuid" TEXT,
+  "side" TEXT CHECK("side" IN ('top', 'bottom', 'unknown')) DEFAULT 'unknown',
+  "x_mm" REAL,
+  "y_mm" REAL,
+  "rotation" REAL,
+  "value" TEXT,
+  "footprint" TEXT,
+  "mpn" TEXT,
+  "manufacturer" TEXT,
+  "dnp" INTEGER DEFAULT 0 CHECK("dnp" IN (0, 1)),
+  "bounding_json" TEXT,
+  "notes" TEXT,
+  FOREIGN KEY("project_id") REFERENCES "projects"("id") ON DELETE CASCADE,
+  FOREIGN KEY("bom_row_id") REFERENCES "project_bom"("id") ON DELETE SET NULL
+);
+
+CREATE TABLE IF NOT EXISTS "project_build_sessions" (
+  "id" INTEGER PRIMARY KEY,
+  "project_id" INTEGER NOT NULL,
+  "name" TEXT NOT NULL,
+  "status" TEXT DEFAULT 'active',
+  "build_quantity" INTEGER NOT NULL DEFAULT 1 CHECK("build_quantity" >= 0),
+  "created_at" TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  "updated_at" TEXT,
+  "notes" TEXT,
+  FOREIGN KEY("project_id") REFERENCES "projects"("id") ON DELETE CASCADE
+);
+
+CREATE TABLE IF NOT EXISTS "project_build_steps" (
+  "id" INTEGER PRIMARY KEY,
+  "session_id" INTEGER NOT NULL,
+  "project_id" INTEGER NOT NULL,
+  "placement_id" INTEGER,
+  "bom_row_id" INTEGER,
+  "reference" TEXT NOT NULL,
+  "status" TEXT DEFAULT 'pending' CHECK("status" IN ('pending', 'done', 'skipped')),
+  "taken_quantity" INTEGER NOT NULL DEFAULT 0 CHECK("taken_quantity" >= 0),
+  "completed_at" TEXT,
+  "notes" TEXT,
+  FOREIGN KEY("session_id") REFERENCES "project_build_sessions"("id") ON DELETE CASCADE,
+  FOREIGN KEY("project_id") REFERENCES "projects"("id") ON DELETE CASCADE,
+  FOREIGN KEY("placement_id") REFERENCES "project_placements"("id") ON DELETE SET NULL,
+  FOREIGN KEY("bom_row_id") REFERENCES "project_bom"("id") ON DELETE SET NULL
+);
+
+CREATE INDEX IF NOT EXISTS "idx_project_sources_project" ON "project_sources" ("project_id");
+CREATE INDEX IF NOT EXISTS "idx_project_placements_project" ON "project_placements" ("project_id");
+CREATE INDEX IF NOT EXISTS "idx_project_placements_bom" ON "project_placements" ("bom_row_id");
+CREATE INDEX IF NOT EXISTS "idx_project_build_sessions_project" ON "project_build_sessions" ("project_id");
+CREATE INDEX IF NOT EXISTS "idx_project_build_steps_session" ON "project_build_steps" ("session_id");
+CREATE INDEX IF NOT EXISTS "idx_project_build_steps_project" ON "project_build_steps" ("project_id");
 
 CREATE TABLE IF NOT EXISTS "part_aliases" (
   "id" INTEGER PRIMARY KEY,
@@ -2002,13 +2075,17 @@ CREATE TABLE IF NOT EXISTS "stock_movements" (
   "quantity" INTEGER NOT NULL DEFAULT 0 CHECK("quantity" >= 0),
   "project_id" INTEGER,
   "bom_row_id" INTEGER,
+  "build_session_id" INTEGER,
+  "placement_id" INTEGER,
   "created_at" TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
   "notes" TEXT,
   FOREIGN KEY("part_id") REFERENCES "parts"("id") ON DELETE CASCADE,
   FOREIGN KEY("from_location_id") REFERENCES "locations"("id") ON DELETE SET NULL,
   FOREIGN KEY("to_location_id") REFERENCES "locations"("id") ON DELETE SET NULL,
   FOREIGN KEY("project_id") REFERENCES "projects"("id") ON DELETE SET NULL,
-  FOREIGN KEY("bom_row_id") REFERENCES "project_bom"("id") ON DELETE SET NULL
+  FOREIGN KEY("bom_row_id") REFERENCES "project_bom"("id") ON DELETE SET NULL,
+  FOREIGN KEY("build_session_id") REFERENCES "project_build_sessions"("id") ON DELETE SET NULL,
+  FOREIGN KEY("placement_id") REFERENCES "project_placements"("id") ON DELETE SET NULL
 );
 
 CREATE TABLE IF NOT EXISTS "activity_log" (

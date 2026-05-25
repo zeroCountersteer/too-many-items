@@ -1,4 +1,8 @@
 import { createStaticServer } from "./static-server.mjs";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
+
+const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 
 async function loadPlaywright() {
   try {
@@ -47,7 +51,7 @@ try {
   await page.goto(`http://${host}:${port}/`, { waitUntil: "domcontentloaded" });
   await page.waitForFunction(() => document.body.dataset.appReady === "true", { timeout: 20000 });
 
-  for (const view of ["parts", "add", "locations", "projects", "database", "settings"]) {
+  for (const view of ["parts", "add", "locations", "projects", "editor", "database", "settings"]) {
     await page.click(`[data-view="${view}"]`);
     await page.waitForFunction((name) => document.querySelector(`[data-view="${name}"]`)?.classList.contains("active"), view);
     const title = await page.textContent("#windowTitle");
@@ -119,6 +123,53 @@ try {
   if (!projectText?.includes("BOM total")) throw new Error("Project cost summary did not render.");
   if (!projectText?.includes("USD")) throw new Error("Project cost summary did not use the default currency.");
 
+  await page.click('[data-action="project-tab"][data-tab="source"]');
+  await page.selectOption('#kicadSourceForm [name="projectMode"]', "create");
+  await page.fill('#kicadSourceForm [name="projectName"]', "KiCad Smoke Source");
+  await page.setInputFiles('#kicadSourceForm [name="kicadFiles"]', path.join(root, "scripts", "fixtures", "kicad-smoke"));
+  await page.click('[data-action="preview-kicad-source"]');
+  await page.locator("#kicadSourcePreview", { hasText: "R1" }).waitFor({ timeout: 10000 });
+  await page.click('[data-action="import-kicad-source"]');
+  await page.waitForFunction(() => document.querySelector(".build-guide-panel"), { timeout: 10000 });
+  const guideText = await page.textContent(".build-guide-panel");
+  if (!guideText?.includes("R1") || !guideText?.includes("iBOM build guide")) throw new Error("KiCad source import did not route to the build guide.");
+  {
+    const answers = ["Smoke build", "1"];
+    const handler = async (dialog) => dialog.accept(answers.shift() || "");
+    page.on("dialog", handler);
+    await page.click('[data-action="create-build-session"]');
+    await page.waitForTimeout(250);
+    page.off("dialog", handler);
+  }
+  await page.waitForTimeout(500);
+  if (!await page.locator(".build-guide-panel", { hasText: "Smoke build" }).count()) throw new Error("Build session was not created.");
+  await page.locator('.build-placement-table [data-action="mark-placement-done"]').first().click();
+  await page.waitForTimeout(250);
+  if (!await page.locator(".build-guide-panel", { hasText: "done" }).count()) throw new Error("Build guide did not track done progress.");
+  const beforeGuideTake = await page.textContent(".build-guide-panel");
+  {
+    const handler = async (dialog) => dialog.accept("1");
+    page.on("dialog", handler);
+    await page.locator('.build-placement-table [data-action="take-placement"]').first().click();
+    await page.waitForTimeout(250);
+    page.off("dialog", handler);
+  }
+  await page.waitForTimeout(250);
+  const afterGuideTake = await page.textContent(".build-guide-panel");
+  if (beforeGuideTake === afterGuideTake || !afterGuideTake?.includes("took")) throw new Error("Build guide take did not record taken quantity.");
+
+  await page.click('[data-view="editor"]');
+  await page.click('[data-action="editor-table"][data-table="stock"]');
+  await page.locator('[data-editor-select]').first().check();
+  await page.fill("#editorBatchPrice", "0.025");
+  await page.fill("#editorBatchCurrency", "USD");
+  await page.click('[data-action="editor-batch-price"]');
+  await page.click('[data-action="editor-validate"]');
+  if (!await page.locator("#editorValidation", { hasText: "Validation passed" }).count()) throw new Error("Advanced editor validation did not pass after batch edit.");
+  await page.click('[data-action="editor-apply"]');
+  await page.waitForTimeout(250);
+  if (!await page.locator("text=advanced editor changes applied").count()) throw new Error("Advanced editor did not apply changes.");
+
   await page.click('[data-view="database"]');
   await page.waitForFunction(() => document.querySelector('[data-view="database"]')?.classList.contains("active"), { timeout: 10000 });
   const healthText = await page.textContent(".ok-card, .warn-card");
@@ -130,7 +181,7 @@ try {
     { width: 390, height: 760 }
   ]) {
     await page.setViewportSize(viewport);
-    for (const view of ["parts", "add", "locations", "projects", "database", "settings"]) {
+    for (const view of ["parts", "add", "locations", "projects", "editor", "database", "settings"]) {
       await page.click(`[data-view="${view}"]`);
       await page.waitForFunction((name) => document.querySelector(`[data-view="${name}"]`)?.classList.contains("active"), view);
       await page.waitForTimeout(120);

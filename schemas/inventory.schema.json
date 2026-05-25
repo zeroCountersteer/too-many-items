@@ -119,6 +119,11 @@
           "name": { "type": "string" },
           "revision": { "type": ["string", "null"] },
           "sourceFile": { "type": ["string", "null"] },
+          "status": { "type": ["string", "null"] },
+          "targetQuantity": { "type": "integer", "minimum": 0 },
+          "dueDate": { "type": ["string", "null"] },
+          "owner": { "type": ["string", "null"] },
+          "tags": { "type": ["string", "null"] },
           "createdAt": { "type": "string" },
           "updatedAt": { "type": ["string", "null"] },
           "notes": { "type": ["string", "null"] }
@@ -140,6 +145,84 @@
           "referencesText": { "type": ["string", "null"] },
           "quantity": { "type": "integer", "minimum": 0 },
           "fitted": { "type": "integer", "enum": [0, 1] },
+          "notes": { "type": ["string", "null"] }
+        }
+      }
+    },
+    "projectSources": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["id", "projectId", "fileName"],
+        "properties": {
+          "id": { "type": "integer" },
+          "projectId": { "type": "integer" },
+          "fileName": { "type": "string" },
+          "fileType": { "type": ["string", "null"] },
+          "fileHash": { "type": ["string", "null"] },
+          "importedAt": { "type": "string" },
+          "parserVersion": { "type": ["string", "null"] },
+          "notes": { "type": ["string", "null"] }
+        }
+      }
+    },
+    "projectPlacements": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["id", "projectId", "reference"],
+        "properties": {
+          "id": { "type": "integer" },
+          "projectId": { "type": "integer" },
+          "bomRowId": { "type": ["integer", "null"] },
+          "reference": { "type": "string" },
+          "sourceUuid": { "type": ["string", "null"] },
+          "side": { "type": "string", "enum": ["top", "bottom", "unknown"] },
+          "xMm": { "type": ["number", "null"] },
+          "yMm": { "type": ["number", "null"] },
+          "rotation": { "type": ["number", "null"] },
+          "value": { "type": ["string", "null"] },
+          "footprint": { "type": ["string", "null"] },
+          "mpn": { "type": ["string", "null"] },
+          "manufacturer": { "type": ["string", "null"] },
+          "dnp": { "type": "integer", "enum": [0, 1] },
+          "boundingJson": { "type": ["string", "null"] },
+          "notes": { "type": ["string", "null"] }
+        }
+      }
+    },
+    "projectBuildSessions": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["id", "projectId", "name"],
+        "properties": {
+          "id": { "type": "integer" },
+          "projectId": { "type": "integer" },
+          "name": { "type": "string" },
+          "status": { "type": ["string", "null"] },
+          "buildQuantity": { "type": "integer", "minimum": 0 },
+          "createdAt": { "type": "string" },
+          "updatedAt": { "type": ["string", "null"] },
+          "notes": { "type": ["string", "null"] }
+        }
+      }
+    },
+    "projectBuildSteps": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["id", "sessionId", "projectId", "reference"],
+        "properties": {
+          "id": { "type": "integer" },
+          "sessionId": { "type": "integer" },
+          "projectId": { "type": "integer" },
+          "placementId": { "type": ["integer", "null"] },
+          "bomRowId": { "type": ["integer", "null"] },
+          "reference": { "type": "string" },
+          "status": { "type": "string", "enum": ["pending", "done", "skipped"] },
+          "takenQuantity": { "type": "integer", "minimum": 0 },
+          "completedAt": { "type": ["string", "null"] },
           "notes": { "type": ["string", "null"] }
         }
       }
@@ -188,6 +271,8 @@
           "quantity": { "type": "integer", "minimum": 0 },
           "projectId": { "type": ["integer", "null"] },
           "bomRowId": { "type": ["integer", "null"] },
+          "buildSessionId": { "type": ["integer", "null"] },
+          "placementId": { "type": ["integer", "null"] },
           "createdAt": { "type": "string" },
           "notes": { "type": ["string", "null"] }
         }
