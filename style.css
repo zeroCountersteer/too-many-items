@@ -476,6 +476,13 @@ summary {
   max-height: 240px;
 }
 
+.mini-input {
+  min-width: 64px;
+  max-width: 92px;
+  min-height: 28px;
+  padding: 3px 6px;
+}
+
 .panel,
 .form-section {
   padding: 10px;
@@ -940,6 +947,16 @@ th:last-child {
 
 .bulk-preview {
   margin-top: 10px;
+}
+
+.bom-mapping-panel {
+  margin: 8px 0;
+}
+
+.bom-mapping-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  gap: 6px;
 }
 
 .nested-card {

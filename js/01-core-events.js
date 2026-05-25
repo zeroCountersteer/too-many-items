@@ -442,6 +442,11 @@ function handleChange(event) {
     return;
   }
 
+  if (target.matches("[data-bom-map]")) {
+    previewBomImport();
+    return;
+  }
+
   if (target.id === "partCategorySelect") {
     const categoryName = getCategoryName(Number(target.value));
     const form = target.closest("form");
@@ -542,7 +547,7 @@ function previewBulkMove() {
     });
   });
   state.bulkOperationPreview = rows.length
-    ? `<div class="table-wrap mini-preview"><table class="data-table"><thead><tr><th>Part</th><th>From</th><th>To</th><th>Qty</th></tr></thead><tbody>${rows.slice(0, 40).map((item) => `<tr><td>${escapeHtml(item.part?.name || "")}</td><td>${escapeHtml(item.row.locationId ? locationPath(item.row.locationId) : "no location")}</td><td>${escapeHtml(toLocationId ? locationPath(toLocationId) : "no location")}</td><td>${item.moveQty}</td></tr>`).join("")}</tbody></table></div>${rows.length > 40 ? `<p class="small-note">${rows.length - 40} more movement rows</p>` : ""}`
+    ? `<div class="table-wrap mini-preview"><table class="data-table"><thead><tr><th>Part</th><th>From</th><th>To</th><th>Available</th><th>Move qty</th></tr></thead><tbody>${rows.map((item) => `<tr><td>${escapeHtml(item.part?.name || "")}</td><td>${escapeHtml(item.row.locationId ? locationPath(item.row.locationId) : "no location")}</td><td>${escapeHtml(toLocationId ? locationPath(toLocationId) : "no location")}</td><td>${numberOrZero(item.row.quantity)}</td><td><input class="mini-input" data-bulk-move-row data-stock-id="${item.row.id}" type="number" min="0" max="${numberOrZero(item.row.quantity)}" step="1" value="${item.moveQty}" /></td></tr>`).join("")}</tbody></table></div>`
     : `<p class="small-note danger-text">No stock rows match that source.</p>`;
   const target = $("#bulkOperationPreview");
   if (target) target.innerHTML = state.bulkOperationPreview;
@@ -554,8 +559,30 @@ function applyBulkMove() {
   const fromLocationId = bulkLocationValue("#bulkFromLocation", true);
   const toLocationId = bulkLocationValue("#bulkToLocation");
   const qty = integerOrZero($("#bulkMoveQty")?.value);
+  const rowInputs = [...$$("[data-bulk-move-row]")];
   let changed = 0;
   let moved = 0;
+  if (rowInputs.length) {
+    rowInputs.forEach((input) => {
+      const result = moveStockLotToLocation(input.dataset.stockId, toLocationId, input.value, { notes: "bulk move preview row" });
+      if (!result.ok && result.error !== "quantity is required") {
+        toast(`move skipped: ${result.error}`, "error");
+        return;
+      }
+      changed += result.changed;
+      moved += result.quantity;
+    });
+    if (!moved) {
+      toast("nothing moved", "error");
+      return;
+    }
+    logActivity("bulk-move", "stock", null, `${moved} items across ${changed} stock rows`);
+    state.bulkOperationPreview = "";
+    touchInventory();
+    if (!persistDatabase("bulk move applied", { dirty: true })) return;
+    render();
+    return;
+  }
   for (const partId of ids) {
     const result = moveStockFromRows(partId, fromLocationId, toLocationId, { all: qty <= 0, quantity: qty, notes: "bulk move" });
     if (!result.ok && result.error !== "quantity is required") {

@@ -970,6 +970,28 @@ function moveStockFromRows(partId, fromLocationId, toLocationId, options = {}) {
   return { ok: true, changed, quantity: moved };
 }
 
+function moveStockLotToLocation(stockRowId, toLocationId, quantity, options = {}) {
+  const source = state.inventory.stock.find((row) => row.id === Number(stockRowId));
+  if (!source) return { ok: false, error: "stock row not found", changed: 0, quantity: 0 };
+  const toId = toLocationId === "" || toLocationId === undefined ? null : nullableNumber(toLocationId);
+  if ((source.locationId ?? null) === (toId ?? null)) return { ok: false, error: "source and destination are the same", changed: 0, quantity: 0 };
+  const qty = integerOrZero(quantity);
+  if (qty <= 0) return { ok: false, error: "quantity is required", changed: 0, quantity: 0 };
+  if (numberOrZero(source.quantity) < qty) return { ok: false, error: `only ${numberOrZero(source.quantity)} available`, changed: 0, quantity: 0 };
+  const target = findMergeableStockRow(source, toId, source.id) || createDestinationStockRow(source, toId);
+  source.quantity = numberOrZero(source.quantity) - qty;
+  target.quantity = numberOrZero(target.quantity) + qty;
+  recordStockMovement({
+    movementType: "move",
+    partId: source.partId,
+    fromLocationId: source.locationId ?? null,
+    toLocationId: toId,
+    quantity: qty,
+    notes: options.notes || `move stock lot to ${toId ? locationPath(toId) : "no location"}`
+  });
+  return { ok: true, changed: 1, quantity: qty };
+}
+
 function takeStock(partId, options = {}) {
   const sourceId = options.locationId === undefined || options.locationId === "" ? undefined : nullableNumber(options.locationId);
   const candidates = stockRowsForPart(partId, sourceId).filter((row) => numberOrZero(row.quantity) > 0);
@@ -1383,6 +1405,7 @@ Object.assign(window, {
   formatMoney,
   recordStockMovement,
   moveStockFromRows,
+  moveStockLotToLocation,
   takeStock,
   setStockRowsMin,
   setStockRowsSource,

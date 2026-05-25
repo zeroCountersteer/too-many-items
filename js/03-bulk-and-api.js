@@ -479,6 +479,20 @@ function generateBulkSeries() {
   previewBulkImport();
 }
 
+const BOM_MAPPING_FIELDS = [
+  ["references", "Refs"],
+  ["quantity", "Qty"],
+  ["value", "Value"],
+  ["footprint", "Footprint/package"],
+  ["mpn", "MPN/part number"],
+  ["manufacturer", "Manufacturer"],
+  ["fitted", "Fitted"],
+  ["dnp", "DNP"],
+  ["notes", "Notes"],
+  ["unitPrice", "Unit price"],
+  ["currency", "Currency"]
+];
+
 function importKiCadBomFromForm() {
   const form = $("#kicadBomForm");
   if (!form) return;
@@ -488,7 +502,7 @@ function importKiCadBomFromForm() {
     toast("BOM CSV is empty", "error");
     return;
   }
-  const parsed = parseBomTable(csv);
+  const parsed = parseBomTable(csv, collectBomMapping(form));
   if (!parsed.rows.length) {
     toast("no BOM rows parsed", "error");
     previewBomImport();
@@ -554,11 +568,13 @@ function previewBomImport() {
   const form = $("#kicadBomForm");
   const target = $("#bomPreview");
   if (!form || !target) return;
-  const parsed = parseBomTable(new FormData(form).get("bomCsv"));
+  const parsed = parseBomTable(new FormData(form).get("bomCsv"), collectBomMapping(form));
   if (!parsed.rows.length) {
-    target.innerHTML = `<div class="empty-panel compact"><h3>nothing parsed</h3><p>${escapeHtml(parsed.errors[0] || "Paste CSV or TSV rows.")}</p></div>`;
+    const mapping = renderBomMappingControls(parsed);
+    target.innerHTML = `<div class="empty-panel compact"><h3>nothing parsed</h3><p>${escapeHtml(parsed.errors[0] || "Paste CSV or TSV rows.")}</p></div>${mapping}`;
     return;
   }
+  const mapping = renderBomMappingControls(parsed);
   const rows = parsed.rows.slice(0, 40).map((row) => {
     const match = findPartForBom(row) || findBestPartForBomRow(row);
     return `<tr><td>${escapeHtml(row.references || "")}</td><td>${row.quantity}</td><td>${escapeHtml(row.value || "")}</td><td>${escapeHtml(row.footprint || "")}</td><td>${escapeHtml(row.mpn || "")}</td><td>${row.fitted ? "yes" : "DNP"}</td><td>${match ? escapeHtml(match.name) : `<span class="danger-text">unresolved</span>`}</td></tr>`;
@@ -566,6 +582,7 @@ function previewBomImport() {
   target.innerHTML = `
     <p class="section-title">preview / ${parsed.rows.length} rows / delimiter ${parsed.delimiter === "\t" ? "tab" : escapeHtml(parsed.delimiter)}</p>
     ${parsed.errors.length ? `<p class="small-note danger-text">${escapeHtml(parsed.errors.slice(0, 3).join(" / "))}</p>` : ""}
+    ${mapping}
     <div class="table-wrap compact-table"><table class="data-table"><thead><tr><th>Refs</th><th>Qty</th><th>Value</th><th>Footprint</th><th>MPN</th><th>Fitted</th><th>Auto match</th></tr></thead><tbody>${rows}</tbody></table></div>`;
 }
 
@@ -581,20 +598,37 @@ function parseCsvTable(text) {
   }));
 }
 
-function parseBomTable(text) {
+function parseBomTable(text, mapping = null) {
   const lines = String(text || "").split(/\r?\n/).filter((line) => line.trim());
-  if (!lines.length) return { rows: [], delimiter: ",", errors: ["BOM text is empty"] };
+  if (!lines.length) return { rows: [], delimiter: ",", errors: ["BOM text is empty"], columns: [], mapping: {} };
   const delimiter = detectTableDelimiter(lines);
   const first = parseSimpleCsvLine(lines[0], delimiter);
   const hasHeader = looksLikeBomHeader(first);
-  const header = hasHeader ? first.map(normalizeHeaderName).map(bomHeaderAlias) : ["references", "quantity", "value", "footprint", "mpn", "manufacturer", "notes"];
+  const sourceColumns = (hasHeader ? first : first.map((_, index) => `Column ${index + 1}`)).map((label, index) => ({
+    index,
+    label: textValue(label) || `Column ${index + 1}`,
+    autoTarget: hasHeader ? bomHeaderAlias(normalizeHeaderName(label)) : ""
+  }));
+  const autoMapping = buildAutoBomMapping(sourceColumns, hasHeader);
+  const activeMapping = normalizeBomMapping(mapping, sourceColumns, autoMapping);
+  const header = hasCustomBomMapping(mapping)
+    ? null
+    : hasHeader
+      ? first.map(normalizeHeaderName).map(bomHeaderAlias)
+      : ["references", "quantity", "value", "footprint", "mpn", "manufacturer", "notes"];
   const dataLines = hasHeader ? lines.slice(1) : lines;
   const errors = [];
   const rows = [];
   dataLines.forEach((line, index) => {
     const cells = parseSimpleCsvLine(line, delimiter);
     const raw = {};
-    header.forEach((name, i) => raw[name] = cells[i] || "");
+    if (hasCustomBomMapping(mapping)) {
+      Object.entries(activeMapping).forEach(([target, columnIndex]) => {
+        if (columnIndex !== "" && columnIndex !== null && columnIndex !== undefined) raw[target] = cells[Number(columnIndex)] || "";
+      });
+    } else {
+      header.forEach((name, i) => raw[name] = cells[i] || "");
+    }
     const normalized = normalizeBomRow(raw);
     if (!normalized.references && !normalized.value && !normalized.mpn) {
       errors.push(`row ${index + 1}: missing refs/value/mpn`);
@@ -602,7 +636,62 @@ function parseBomTable(text) {
     }
     rows.push(normalized);
   });
-  return { rows, delimiter, errors };
+  return { rows, delimiter, errors, columns: sourceColumns, mapping: activeMapping, hasHeader };
+}
+
+function collectBomMapping(form) {
+  const root = form?.closest(".bom-import-card") || document;
+  const controls = [...root.querySelectorAll("[data-bom-map]")];
+  if (!controls.length) return null;
+  const mapping = {};
+  controls.forEach((control) => {
+    const target = control.dataset.bomMap;
+    if (target) mapping[target] = control.value;
+  });
+  return mapping;
+}
+
+function hasCustomBomMapping(mapping) {
+  return !!mapping && Object.values(mapping).some((value) => value !== "" && value !== null && value !== undefined);
+}
+
+function buildAutoBomMapping(columns, hasHeader) {
+  const mapping = {};
+  if (hasHeader) {
+    columns.forEach((column) => {
+      if (!column.autoTarget || mapping[column.autoTarget] !== undefined) return;
+      mapping[column.autoTarget] = String(column.index);
+    });
+    return mapping;
+  }
+  ["references", "quantity", "value", "footprint", "mpn", "manufacturer", "notes"].forEach((target, index) => {
+    if (columns[index]) mapping[target] = String(index);
+  });
+  return mapping;
+}
+
+function normalizeBomMapping(mapping, columns, autoMapping) {
+  const validIndexes = new Set(columns.map((column) => String(column.index)));
+  const source = hasCustomBomMapping(mapping) ? mapping : autoMapping;
+  const normalized = {};
+  BOM_MAPPING_FIELDS.forEach(([target]) => {
+    const value = source?.[target];
+    normalized[target] = validIndexes.has(String(value)) ? String(value) : "";
+  });
+  return normalized;
+}
+
+function renderBomMappingControls(parsed) {
+  if (!parsed.columns?.length) return "";
+  const options = (selected) => [`<option value="">not mapped</option>`].concat(parsed.columns.map((column) => (
+    `<option value="${column.index}" ${String(selected) === String(column.index) ? "selected" : ""}>${escapeHtml(column.label)}</option>`
+  ))).join("");
+  return `<details class="advanced-panel bom-mapping-panel" open>
+    <summary>Column mapping</summary>
+    <div class="bom-mapping-grid">
+      ${BOM_MAPPING_FIELDS.map(([target, label]) => `<div class="field"><label>${escapeHtml(label)}</label><select data-bom-map="${escapeAttr(target)}">${options(parsed.mapping?.[target] ?? "")}</select></div>`).join("")}
+    </div>
+  </details>`;
 }
 
 function detectTableDelimiter(lines) {

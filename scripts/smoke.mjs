@@ -81,6 +81,7 @@ try {
   await page.selectOption("#bulkToLocation", { label: "Smoke drawer" });
   await page.click('[data-action="preview-bulk-move"]');
   if (!await page.locator("#bulkOperationPreview", { hasText: "Smoke drawer" }).count()) throw new Error("Bulk move preview did not show destination.");
+  await page.fill('[data-bulk-move-row]', "3");
   await page.click('[data-action="apply-bulk-move"]');
   await page.waitForTimeout(250);
   const movedLocationText = await page.textContent(".compact-parts-table");
@@ -102,11 +103,14 @@ try {
   await page.fill('#kicadBomForm [name="projectName"]', "Smoke Board");
   await page.fill('#kicadBomForm [name="revision"]', "rev smoke");
   await page.fill('#kicadBomForm [name="bomCsv"]', [
-    '"Id","Designator","Package","Quantity","Designation","Supplier and ref"',
-    '"1","R1 R2","R_0603_1608Metric","2","10k",""',
-    '"2","C1","C_0603_1608Metric","1","100nF",""'
+    'RefList;Count;Thing;LandPattern;Catalog',
+    'R1 R2;2;10k;R_0603_1608Metric;',
+    'C1;1;100nF;C_0603_1608Metric;'
   ].join("\n"));
   await page.click('#kicadBomForm [data-action="preview-bom-import"]');
+  await page.selectOption('[data-bom-map="references"]', { label: "RefList" });
+  await page.selectOption('[data-bom-map="value"]', { label: "Thing" });
+  await page.selectOption('[data-bom-map="footprint"]', { label: "LandPattern" });
   if (!await page.locator("#bomPreview", { hasText: "R1 R2" }).count()) throw new Error("Generic BOM preview did not render parsed rows.");
   await page.click('#kicadBomForm [data-action="import-kicad-bom"]');
   await page.waitForFunction(() => document.querySelector('[data-view="projects"]')?.classList.contains("active"), { timeout: 10000 });
