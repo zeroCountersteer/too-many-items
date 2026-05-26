@@ -650,28 +650,44 @@ function renderBomTable(project, rows) {
     const status = bomRowStatus(row);
     const cost = bomRowCost(row);
     return `<tr class="${status.shortage ? "bom-shortage" : ""}">
-      <td>${escapeHtml(row.referencesText || "")}</td>
-      <td>${escapeHtml(row.value || "")}</td>
-      <td>${escapeHtml(row.footprint || "")}</td>
-      <td>${escapeHtml(row.mpn || "")}</td>
+      <td><span class="cell-truncate" title="${escapeAttr(row.referencesText || "")}">${escapeHtml(row.referencesText || "")}</span></td>
+      <td><span class="cell-truncate" title="${escapeAttr(row.value || "")}">${escapeHtml(row.value || "")}</span></td>
+      <td><span class="cell-truncate mono-cell" title="${escapeAttr(row.footprint || "")}">${escapeHtml(typeof shortFootprint === "function" ? shortFootprint(row.footprint || "") : (row.footprint || ""))}</span></td>
+      <td><span class="cell-truncate" title="${escapeAttr(row.mpn || "")}">${escapeHtml(row.mpn || "")}</span></td>
       <td>${row.quantity}</td>
-      <td>${part ? `<button type="button" class="link-button" data-action="open-edit-part" data-id="${part.id}">${escapeHtml(part.name)}</button>` : `<span class="danger-text">unresolved</span>`}</td>
+      <td>${part ? `<button type="button" class="link-button cell-truncate" data-action="open-edit-part" data-id="${part.id}" title="${escapeAttr(part.name)}">${escapeHtml(part.name)}</button>` : `<span class="danger-text">unresolved</span>`}</td>
       <td>${status.available}</td>
       <td>${status.reserved}</td>
       <td>${status.shortage ? `<span class="qty-low">${status.shortage}</span>` : `<span class="qty-ok">0</span>`}</td>
       <td>${cost.total == null ? `<span class="muted">missing</span>` : escapeHtml(formatMoney(cost.total, cost.currency))}${cost.mixedCurrency ? ` <span class="danger-text">mixed</span>` : ""}</td>
-      <td>${row.fitted === 0 ? "no" : "yes"}</td>
-      <td class="bom-actions action-cell">
-        <button type="button" data-action="match-bom-row" data-id="${row.id}">match</button>
-        ${row.partId ? `<button type="button" data-action="take-bom-row" data-id="${row.id}">take</button>` : ""}
-        <button type="button" data-action="open-edit-bom-row" data-id="${row.id}">edit</button>
-        <button type="button" data-action="unlink-bom-row" data-id="${row.id}">unlink</button>
-        <button type="button" class="danger-button" data-action="delete-bom-row" data-id="${row.id}">delete</button>
+      <td><span class="badge status-chip ${row.fitted === 0 ? "skipped" : "done"}">${row.fitted === 0 ? "DNP" : "fit"}</span></td>
+      <td class="action-cell">
+        <div class="row-action-grid bom-action-grid">
+          <button type="button" class="small-button" data-action="match-bom-row" data-id="${row.id}">match</button>
+          ${row.partId ? `<button type="button" class="small-button" data-action="take-bom-row" data-id="${row.id}">take</button>` : ""}
+          <button type="button" class="small-button" data-action="open-edit-bom-row" data-id="${row.id}">edit</button>
+          <button type="button" class="small-button" data-action="unlink-bom-row" data-id="${row.id}">unlink</button>
+          <button type="button" class="small-button danger-button" data-action="delete-bom-row" data-id="${row.id}">del</button>
+        </div>
       </td>
     </tr>`;
   }).join("") : `<tr><td colspan="12">No BOM rows.</td></tr>`;
 
-  return `<div class="table-wrap"><table class="data-table compact-parts-table bom-table">
+  return `<div class="table-wrap bom-table-wrap"><table class="data-table compact-parts-table bom-table">
+    <colgroup>
+      <col class="col-refs" />
+      <col class="col-value" />
+      <col class="col-footprint" />
+      <col class="col-mpn" />
+      <col class="col-qty" />
+      <col class="col-match" />
+      <col class="col-small" />
+      <col class="col-small" />
+      <col class="col-small" />
+      <col class="col-cost" />
+      <col class="col-fit" />
+      <col class="col-actions" />
+    </colgroup>
     <thead><tr>${Object.values(PROJECT_COLUMN_DEFS).map((label) => `<th>${escapeHtml(label || "Actions")}</th>`).join("")}</tr></thead>
     <tbody>${body}</tbody>
   </table></div>`;

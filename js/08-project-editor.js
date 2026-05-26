@@ -172,7 +172,8 @@ function renderProjectSourceImport(project) {
         <div class="field"><label>revision</label><input name="revision" value="${escapeAttr(defaultRevision)}" placeholder="rev A" /></div>
         <div class="field"><label>target qty</label><input name="targetQuantity" type="number" min="0" step="1" value="${escapeAttr(project?.targetQuantity || 1)}" /></div>
         <div class="field"><label>owner</label><input name="owner" value="${escapeAttr(project?.owner || "")}" /></div>
-        <div class="field span-2"><label>KiCad source files</label><input name="kicadFiles" type="file" multiple webkitdirectory accept=".kicad_pro,.kicad_pcb,.kicad_sch" /></div>
+        <div class="field"><label>KiCad project folder</label><input name="kicadFolder" type="file" multiple webkitdirectory /></div>
+        <div class="field"><label>or source files</label><input name="kicadFiles" type="file" multiple accept=".kicad_pro,.kicad_pcb,.kicad_sch" /></div>
       </div>
       <div class="action-row">
         <button type="button" data-action="preview-kicad-source">preview source</button>
@@ -216,7 +217,17 @@ function renderProjectBuildGuide(project) {
     </div>
     ${placements.length ? `<div class="build-guide-grid">
       ${renderBoardSvg(project, shown, session)}
-      <div class="table-wrap build-placement-table"><table class="data-table compact-parts-table">
+      <div class="table-wrap build-placement-table"><table class="data-table compact-parts-table build-guide-table">
+        <colgroup>
+          <col class="col-ref" />
+          <col class="col-side" />
+          <col class="col-value" />
+          <col class="col-footprint" />
+          <col class="col-match" />
+          <col class="col-stock" />
+          <col class="col-status" />
+          <col class="col-actions" />
+        </colgroup>
         <thead><tr><th>Ref</th><th>Side</th><th>Value</th><th>Footprint</th><th>Match</th><th>Stock</th><th>Status</th><th>Actions</th></tr></thead>
         <tbody>${rows}</tbody>
       </table></div>
@@ -230,19 +241,22 @@ function renderPlacementGuideRow(project, placement, session) {
   const status = row ? bomRowStatus(row) : { available: 0, shortage: 0 };
   const step = session ? buildStepForPlacement(session.id, placement.id) : null;
   const stepStatus = step?.status || "pending";
+  const disabled = session ? "" : "disabled title=\"Create a build session first\"";
   return `<tr class="${stepStatus !== "pending" ? "build-step-done" : ""}">
     <td class="mono-cell">${escapeHtml(placement.reference)}</td>
-    <td>${escapeHtml(placement.side || "unknown")}</td>
-    <td>${escapeHtml(placement.value || row?.value || "")}</td>
-    <td>${escapeHtml(placement.footprint || row?.footprint || "")}</td>
-    <td>${part ? `<button type="button" class="link-button" data-action="open-edit-part" data-id="${part.id}">${escapeHtml(part.name)}</button>` : `<span class="danger-text">unresolved</span>`}</td>
-    <td>${part ? `${stockSummary(part.id).total} on hand${status.shortage ? ` / <span class="qty-low">${status.shortage} short</span>` : ""}` : "-"}</td>
-    <td>${escapeHtml(stepStatus)}${step?.takenQuantity ? ` / took ${step.takenQuantity}` : ""}</td>
+    <td><span class="badge side-chip ${escapeAttr(placement.side || "unknown")}">${escapeHtml(placement.side || "unknown")}</span></td>
+    <td><span class="cell-truncate" title="${escapeAttr(placement.value || row?.value || "")}">${escapeHtml(placement.value || row?.value || "")}</span></td>
+    <td><span class="cell-truncate mono-cell" title="${escapeAttr(placement.footprint || row?.footprint || "")}">${escapeHtml(shortFootprint(placement.footprint || row?.footprint || ""))}</span></td>
+    <td>${part ? `<button type="button" class="link-button cell-truncate" data-action="open-edit-part" data-id="${part.id}" title="${escapeAttr(part.name)}">${escapeHtml(part.name)}</button>` : `<span class="danger-text">unresolved</span>`}</td>
+    <td>${part ? `<span class="qty-ok">${stockSummary(part.id).total}</span>${status.shortage ? ` / <span class="qty-low">${status.shortage} short</span>` : ""}` : "-"}</td>
+    <td><span class="badge status-chip ${escapeAttr(session ? stepStatus : "pending")}">${escapeHtml(session ? stepStatus : "no session")}</span>${step?.takenQuantity ? ` <span class="subtext">took ${step.takenQuantity}</span>` : ""}</td>
     <td class="action-cell">
-      ${part ? `<button type="button" data-action="take-placement" data-id="${placement.id}">take</button>` : ""}
-      <button type="button" data-action="mark-placement-done" data-id="${placement.id}">done</button>
-      <button type="button" data-action="mark-placement-skipped" data-id="${placement.id}">skip</button>
-      <button type="button" data-action="mark-placement-pending" data-id="${placement.id}">reset</button>
+      <div class="row-action-grid">
+        ${part ? `<button type="button" class="small-button" data-action="take-placement" data-id="${placement.id}" ${disabled}>take</button>` : ""}
+        <button type="button" class="small-button" data-action="mark-placement-done" data-id="${placement.id}" ${disabled}>done</button>
+        <button type="button" class="small-button" data-action="mark-placement-skipped" data-id="${placement.id}" ${disabled}>skip</button>
+        <button type="button" class="small-button" data-action="mark-placement-pending" data-id="${placement.id}" ${disabled}>reset</button>
+      </div>
     </td>
   </tr>`;
 }
@@ -266,16 +280,24 @@ function renderBoardSvg(project, placements, session) {
       step?.status === "skipped" ? "skipped" : ""
     ].filter(Boolean).join(" ");
     return `<g class="${cls}" data-action="mark-placement-done" data-id="${placement.id}" transform="translate(${x} ${y}) rotate(${placement.rotation || 0})">
-      <circle r="1.6"></circle>
+      <circle r="1.9"></circle>
       <text x="2.4" y="0.8">${escapeHtml(placement.reference)}</text>
     </g>`;
   }).join("");
-  return `<div class="board-panel">
+  const ratio = `${trimNumber(width + pad * 2)} / ${trimNumber(height + pad * 2)}`;
+  return `<div class="board-panel" style="--board-ratio:${escapeAttr(ratio)}">
     <svg class="board-svg" viewBox="${escapeAttr(viewBox)}" role="img" aria-label="PCB placement map">
       <rect class="board-outline" x="${bounds.minX}" y="${bounds.minY}" width="${width}" height="${height}" rx="1.5"></rect>
       ${markers}
     </svg>
   </div>`;
+}
+
+function shortFootprint(value) {
+  const text = String(value || "");
+  const parts = text.split(":");
+  const clean = parts.length > 1 ? parts.slice(1).join(":") : text;
+  return clean.length > 42 ? `${clean.slice(0, 39)}...` : clean;
 }
 
 function renderProjectHistory(project) {
@@ -464,7 +486,7 @@ async function previewKiCadSourceFromForm() {
   if (!form || !target) return;
   target.innerHTML = `<p class="small-note">Parsing KiCad files...</p>`;
   try {
-    const parsed = await parseKiCadProjectFiles(form.querySelector("[name='kicadFiles']")?.files || []);
+    const parsed = await parseKiCadProjectFiles(kiCadFilesFromForm(form));
     target.innerHTML = renderKiCadSourcePreview(parsed);
   } catch (error) {
     target.innerHTML = `<p class="danger-text">${escapeHtml(error.message)}</p>`;
@@ -475,7 +497,7 @@ async function importKiCadSourceFromForm() {
   const form = $("#kicadSourceForm");
   if (!form) return;
   try {
-    const parsed = await parseKiCadProjectFiles(form.querySelector("[name='kicadFiles']")?.files || []);
+    const parsed = await parseKiCadProjectFiles(kiCadFilesFromForm(form));
     if (!parsed.components.length) {
       toast("no KiCad components found", "error");
       previewKiCadSourceFromForm();
@@ -607,6 +629,13 @@ function renderKiCadSourcePreview(parsed) {
   return `<p class="section-title">preview / ${parsed.components.length} references / ${groups.length} BOM groups / ${parsed.sources.length} source files</p>
     ${parsed.warnings.length ? `<p class="small-note danger-text">${escapeHtml(parsed.warnings.slice(0, 4).join(" / "))}</p>` : ""}
     <div class="table-wrap compact-table"><table class="data-table"><thead><tr><th>Refs</th><th>Qty</th><th>Value</th><th>Footprint</th><th>MPN</th><th>Fitted</th><th>Auto match</th></tr></thead><tbody>${rows || `<tr><td colspan="7">No components parsed.</td></tr>`}</tbody></table></div>`;
+}
+
+function kiCadFilesFromForm(form) {
+  return [
+    ...[...(form.querySelector("[name='kicadFolder']")?.files || [])],
+    ...[...(form.querySelector("[name='kicadFiles']")?.files || [])]
+  ];
 }
 
 async function parseKiCadProjectFiles(fileList) {
@@ -965,7 +994,7 @@ function renderEditorBatchToolbar() {
 function editorColumns(table) {
   const maps = {
     parts: ["id", "name", "categoryId", "package", "footprint", "manufacturer", "mpn", "notes"],
-    stock: ["id", "partId", "locationId", "quantity", "minQuantity", "source", "orderNumber", "unitPrice", "currency", "notes"],
+    stock: ["id", "partId", "locationId", "quantity", "minQuantity", "source", "orderNumber", "unitPrice", "currency", "dateAdded", "notes"],
     locations: ["id", "name", "type", "parentId", "capacity", "x", "y", "z", "color", "ledNode", "ledIndex", "notes"],
     aliases: ["id", "partId", "aliasType", "aliasValue", "notes"],
     specs: ["kind", "partId", "resistanceOhm", "capacitanceF", "inductanceH", "tolerancePercent", "voltageV", "powerW", "dielectric", "currentA"],
@@ -1012,6 +1041,7 @@ function renderEditorInput(table, col, row, isNew) {
   if (col === "projectId") return `<select data-editor-field="${col}">${state.inventory.projects.map((project) => `<option value="${project.id}" ${Number(value) === project.id ? "selected" : ""}>${escapeHtml(project.name)}</option>`).join("")}</select>`;
   if (col === "kind") return `<select data-editor-field="${col}">${Object.keys(SPEC_CONFIGS).map((kind) => `<option value="${kind}" ${value === kind ? "selected" : ""}>${kind}</option>`).join("")}</select>`;
   if (col === "fitted") return `<select data-editor-field="${col}"><option value="1" ${Number(value) !== 0 ? "selected" : ""}>1</option><option value="0" ${Number(value) === 0 ? "selected" : ""}>0</option></select>`;
+  if (col === "dateAdded") return `<input data-editor-field="${col}" type="date" value="${escapeAttr(value || new Date().toISOString().slice(0, 10))}" />`;
   const numeric = /^(quantity|minQuantity|capacity|x|y|z|ledIndex|unitPrice|resistanceOhm|capacitanceF|inductanceH|tolerancePercent|voltageV|powerW|currentA)$/.test(col);
   return `<input data-editor-field="${col}" ${numeric ? "type=\"number\" step=\"any\"" : ""} value="${escapeAttr(value)}" />`;
 }
@@ -1117,7 +1147,7 @@ function editorDraftInventory() {
     orderNumber: nullableText(row.orderNumber),
     unitPrice: nullableNumber(row.unitPrice),
     currency: row.unitPrice ? normalizeCurrency(row.currency || defaultCurrency(), defaultCurrency()) : null,
-    dateAdded: new Date().toISOString().slice(0, 10),
+    dateAdded: row.dateAdded || state.inventory.stock.find((item) => item.id === Number(row.id))?.dateAdded || new Date().toISOString().slice(0, 10),
     notes: nullableText(row.notes)
   }));
   if (table === "locations") draft.locations = rows.map((row, index) => ({

@@ -126,13 +126,14 @@ try {
   await page.click('[data-action="project-tab"][data-tab="source"]');
   await page.selectOption('#kicadSourceForm [name="projectMode"]', "create");
   await page.fill('#kicadSourceForm [name="projectName"]', "KiCad Smoke Source");
-  await page.setInputFiles('#kicadSourceForm [name="kicadFiles"]', path.join(root, "scripts", "fixtures", "kicad-smoke"));
+  await page.setInputFiles('#kicadSourceForm [name="kicadFolder"]', path.join(root, "scripts", "fixtures", "kicad-smoke"));
   await page.click('[data-action="preview-kicad-source"]');
   await page.locator("#kicadSourcePreview", { hasText: "R1" }).waitFor({ timeout: 10000 });
   await page.click('[data-action="import-kicad-source"]');
   await page.waitForFunction(() => document.querySelector(".build-guide-panel"), { timeout: 10000 });
   const guideText = await page.textContent(".build-guide-panel");
   if (!guideText?.includes("R1") || !guideText?.includes("iBOM build guide")) throw new Error("KiCad source import did not route to the build guide.");
+  if (!await page.locator('.build-placement-table [data-action="mark-placement-done"]').first().isDisabled()) throw new Error("Build guide actions should be disabled until a build session exists.");
   {
     const answers = ["Smoke build", "1"];
     const handler = async (dialog) => dialog.accept(answers.shift() || "");
@@ -143,6 +144,12 @@ try {
   }
   await page.waitForTimeout(500);
   if (!await page.locator(".build-guide-panel", { hasText: "Smoke build" }).count()) throw new Error("Build session was not created.");
+  const buildGuideLayout = await page.evaluate(() => ({
+    firstRowHeight: Math.round(document.querySelector(".build-guide-table tbody tr")?.getBoundingClientRect().height || 0),
+    boardHeight: Math.round(document.querySelector(".board-panel")?.getBoundingClientRect().height || 0)
+  }));
+  if (buildGuideLayout.firstRowHeight > 76) throw new Error(`Build guide rows are too tall: ${buildGuideLayout.firstRowHeight}px`);
+  if (buildGuideLayout.boardHeight > 430) throw new Error(`Build guide board panel is too tall: ${buildGuideLayout.boardHeight}px`);
   await page.locator('.build-placement-table [data-action="mark-placement-done"]').first().click();
   await page.waitForTimeout(250);
   if (!await page.locator(".build-guide-panel", { hasText: "done" }).count()) throw new Error("Build guide did not track done progress.");
