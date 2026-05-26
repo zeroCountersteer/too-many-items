@@ -545,26 +545,25 @@ function importKiCadBomFromForm() {
   }
 
   parsed.rows.forEach((normalized) => {
-    const match = findPartForBom(normalized) || findBestPartForBomRow(normalized);
     state.inventory.projectBom.push({
       id: nextId(state.inventory.projectBom),
       projectId: project.id,
-      partId: match?.id || null,
+      partId: null,
       value: normalized.value,
       footprint: normalized.footprint,
       mpn: normalized.mpn,
       referencesText: normalized.references,
       quantity: normalized.quantity,
       fitted: normalized.fitted,
-      notes: [match ? null : "unresolved", normalized.notes, normalized.unitPrice ? `import unit price ${normalized.unitPrice}${normalized.currency ? ` ${normalized.currency}` : ""}` : null].filter(Boolean).join("; ") || null
+      notes: [normalized.notes, normalized.unitPrice ? `import unit price ${normalized.unitPrice}${normalized.currency ? ` ${normalized.currency}` : ""}` : null].filter(Boolean).join("; ") || null
     });
   });
-  const auto = autoMatchProject(project.id);
-  logActivity(mode === "update" ? "update-project-bom" : "import-project-bom", "project", project.id, `${parsed.rows.length} rows, ${auto} auto-matched`);
+  logActivity(mode === "update" ? "update-project-bom" : "import-project-bom", "project", project.id, `${parsed.rows.length} rows imported for match review`);
   touchInventory();
   if (!persistDatabase("project BOM imported", { dirty: true })) return;
   toast(`project BOM stored: ${project.name}`);
   state.activeProjectId = project.id;
+  state.activeProjectTab = "match";
   localStorage.setItem(STORAGE.activeProjectId, String(project.id));
   setView("projects");
 }
@@ -581,8 +580,8 @@ function previewBomImport() {
   }
   const mapping = renderBomMappingControls(parsed);
   const rows = parsed.rows.slice(0, 40).map((row) => {
-    const match = findPartForBom(row) || findBestPartForBomRow(row);
-    return `<tr><td>${escapeHtml(row.references || "")}</td><td>${row.quantity}</td><td>${escapeHtml(row.value || "")}</td><td>${escapeHtml(row.footprint || "")}</td><td>${escapeHtml(row.mpn || "")}</td><td>${row.fitted ? "yes" : "DNP"}</td><td>${match ? escapeHtml(match.name) : `<span class="danger-text">unresolved</span>`}</td></tr>`;
+    const candidate = getBomMatchCandidates(row, { limit: 1 })[0];
+    return `<tr><td>${escapeHtml(row.references || "")}</td><td>${row.quantity}</td><td>${escapeHtml(row.value || "")}</td><td>${escapeHtml(row.footprint || "")}</td><td>${escapeHtml(row.mpn || "")}</td><td>${row.fitted ? "yes" : "DNP"}</td><td>${candidate ? `${escapeHtml(candidate.partName)} <span class="muted">(${escapeHtml(candidate.confidence)})</span>` : `<span class="danger-text">no candidate</span>`}</td></tr>`;
   }).join("");
   target.innerHTML = `
     <p class="section-title">preview / ${parsed.rows.length} rows / delimiter ${parsed.delimiter === "\t" ? "tab" : escapeHtml(parsed.delimiter)}</p>

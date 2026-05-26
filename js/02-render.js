@@ -129,7 +129,10 @@ function renderSettingsView() {
         <section class="panel form-section danger-zone">
           <h4>local browser copy</h4>
           <p class="small-note">Edits survive refreshes in local browser storage until you clear them.</p>
-          <button type="button" class="danger-button" data-action="clear-cache">clear local copy</button>
+          <div class="action-row">
+            <button type="button" data-action="restore-repair-backup">restore repair backup</button>
+            <button type="button" class="danger-button" data-action="clear-cache">clear local copy</button>
+          </div>
         </section>
       </div>
 
@@ -567,81 +570,7 @@ function renderBulkLine(index, row = {}) {
 }
 
 function renderProjectsView() {
-  if (typeof renderProjectManagerView === "function") return renderProjectManagerView();
-  const projects = state.inventory.projects || [];
-  const project = activeProject();
-  const list = projects.length
-    ? projects.map((item) => {
-        const summary = projectSummary(item.id);
-        return `<button type="button" class="project-list-item ${project?.id === item.id ? "active" : ""}" data-action="select-project" data-id="${item.id}">
-          <strong>${escapeHtml(item.name)}</strong>
-          <span>${escapeHtml(item.revision || "no rev")} / ${summary.rows} rows / ${summary.shortageRows} shortages</span>
-        </button>`;
-      }).join("")
-    : `<div class="empty-panel compact"><h3>no projects</h3><p>Import a CSV or TSV BOM from the Add view.</p><button type="button" data-action="set-view" data-target-view="add">import BOM</button></div>`;
-
-  if (!project) {
-    return `
-      <div class="view-stack">
-        <div class="view-toolbar">
-          <h3 class="view-title">projects / BOM</h3>
-          <div class="action-row"><button type="button" data-action="set-view" data-target-view="add">import BOM</button></div>
-        </div>
-        <div class="projects-layout"><aside class="project-list">${list}</aside></div>
-      </div>
-    `;
-  }
-
-  const summary = projectSummary(project.id);
-  const cost = projectCostSummary(project.id);
-  const rows = projectBomRows(project.id)
-    .filter((row) => {
-      const q = String(state.projectQuery || "").toLowerCase();
-      if (!q) return true;
-      const part = row.partId ? state.inventory.parts.find((item) => item.id === row.partId) : null;
-      return [row.value, row.footprint, row.mpn, row.referencesText, part?.name].filter(Boolean).join(" ").toLowerCase().includes(q);
-    });
-
-  return `
-    <div class="view-stack">
-      <div class="view-toolbar">
-        <h3 class="view-title">projects / BOM</h3>
-        <div class="action-row">
-          <button type="button" data-action="set-view" data-target-view="add">import BOM</button>
-          <button type="button" data-action="open-edit-project" data-id="${project.id}">edit project</button>
-          <button type="button" data-action="reserve-project" data-id="${project.id}">reserve</button>
-          <button type="button" data-action="release-project" data-id="${project.id}">release</button>
-          <button type="button" class="danger-button" data-action="apply-project-consumption" data-id="${project.id}">consume stock</button>
-        </div>
-      </div>
-      <div class="projects-layout">
-        <aside class="project-list">${list}</aside>
-        <section class="project-detail">
-          <div class="panel project-summary-panel">
-            <div class="project-head">
-              <div>
-                <h4>${escapeHtml(project.name)}</h4>
-                <p>${escapeHtml(project.revision || "no revision")}</p>
-              </div>
-              <button type="button" data-action="delete-project" data-id="${project.id}" class="danger-button">delete project</button>
-            </div>
-            ${renderSummaryStrip([
-              [summary.rows, "BOM rows"],
-              [summary.needed, "needed"],
-              [summary.reserved, "reserved"],
-              [summary.unresolved, "unresolved", summary.unresolved ? "warn" : ""],
-              [summary.shortageRows, "shortages", summary.shortageRows ? "warn" : ""],
-              [formatMoney(cost.total, cost.currency), "BOM total"],
-              [cost.missingPriceRows, "missing price", cost.missingPriceRows ? "warn" : ""],
-              [cost.mixedCurrencyRows, "mixed currency", cost.mixedCurrencyRows ? "warn" : ""]
-            ])}
-            <input type="search" data-project-search value="${escapeAttr(state.projectQuery || "")}" placeholder="filter BOM rows" />
-          </div>
-          ${renderBomTable(project, rows)}
-        </section>
-      </div>
-    </div>
-  `;
+  return renderProjectManagerView();
 }
 
 function renderBomTable(project, rows) {

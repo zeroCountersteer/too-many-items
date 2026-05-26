@@ -21,6 +21,9 @@ const state = {
   activeBuildSessionId: 0,
   projectSideFilter: "both",
   projectQuery: "",
+  projectMatchFilter: "all",
+  selectedBomRowIds: new Set(),
+  projectRepairAnalysis: null,
   editorTable: "parts",
   editorSelection: new Set(),
   editorValidationHtml: "",
@@ -235,19 +238,32 @@ function handleClick(event) {
     case "select-project":
       selectProject(id);
       break;
-    case "auto-match-project": {
-      const matched = autoMatchProject(id);
-      if (!matched) {
-        toast("no unresolved BOM rows matched", "error");
-        break;
-      }
-      logActivity("auto-match-project", "project", id, `${matched} BOM rows matched`);
-      touchInventory();
-      if (!persistDatabase("project BOM auto-matched", { dirty: true })) return;
-      toast(`auto-matched ${matched} BOM row${matched === 1 ? "" : "s"}`);
-      render();
+    case "accept-bom-row-match":
+      acceptBomReviewMatches([id]);
+      break;
+    case "accept-selected-matches":
+      acceptBomReviewMatches([...state.selectedBomRowIds]);
+      break;
+    case "accept-all-exact": {
+      const rows = projectBomRows(id).filter((row) => row.fitted !== 0 && !row.partId && getBomMatchCandidates(row, { limit: 1 })[0]?.confidence === "exact").map((row) => row.id);
+      acceptBomReviewMatches(rows, { exactOnly: true });
       break;
     }
+    case "unlink-selected-matches":
+      unlinkSelectedBomMatches();
+      break;
+    case "clear-bom-review-selection":
+      state.selectedBomRowIds.clear();
+      render();
+      break;
+    case "preview-project-repair":
+      state.projectRepairAnalysis = analyzeProjectRepair(id);
+      state.activeProjectTab = "match";
+      render();
+      break;
+    case "apply-project-repair":
+      applySelectedProjectRepair(id);
+      break;
     case "delete-project":
       deleteProject(id);
       break;
@@ -408,6 +424,9 @@ function handleClick(event) {
     case "clear-cache":
       clearLocalCache();
       break;
+    case "restore-repair-backup":
+      restoreRepairBackupAction();
+      break;
     default:
       break;
   }
@@ -452,6 +471,12 @@ function handleInput(event) {
 
   if (target.matches("[data-project-search]")) {
     state.projectQuery = target.value;
+    if (state.activeView === "projects") $("#viewPanel").innerHTML = renderProjectsView();
+    return;
+  }
+
+  if (target.matches("[data-project-match-filter]")) {
+    state.projectMatchFilter = target.value || "all";
     if (state.activeView === "projects") $("#viewPanel").innerHTML = renderProjectsView();
     return;
   }
@@ -527,6 +552,29 @@ function handleChange(event) {
 
   if (target.matches("[data-bom-map]")) {
     previewBomImport();
+    return;
+  }
+
+  if (target.matches("[data-project-match-filter]")) {
+    state.projectMatchFilter = target.value || "all";
+    if (state.activeView === "projects") $("#viewPanel").innerHTML = renderProjectsView();
+    return;
+  }
+
+  if (target.matches("[data-bom-review-select]")) {
+    const rowId = Number(target.value);
+    if (target.checked) state.selectedBomRowIds.add(rowId);
+    else state.selectedBomRowIds.delete(rowId);
+    return;
+  }
+
+  if (target.matches("[data-bom-review-select-all]")) {
+    $$("[data-bom-review-select]").forEach((input) => {
+      input.checked = target.checked;
+      const rowId = Number(input.value);
+      if (target.checked) state.selectedBomRowIds.add(rowId);
+      else state.selectedBomRowIds.delete(rowId);
+    });
     return;
   }
 
@@ -616,6 +664,78 @@ function selectedPartIdsArray() {
   const valid = new Set(state.inventory.parts.map((part) => part.id));
   state.selectedPartIds = new Set([...(state.selectedPartIds || [])].filter((id) => valid.has(id)));
   return [...state.selectedPartIds];
+}
+
+function acceptBomReviewMatches(rowIds, options = {}) {
+  const ids = (rowIds || []).map(Number).filter(Boolean);
+  if (!ids.length) {
+    toast("select BOM rows first", "error");
+    return;
+  }
+  const projectId = activeProject()?.id || 0;
+  const changed = acceptProjectBomMatches(projectId, { rowIds: ids, mode: options.exactOnly ? "exact" : "selected" });
+  if (!changed) {
+    toast("no selected rows had acceptable candidates", "error");
+    return;
+  }
+  logActivity("accept-bom-matches", "project", projectId, `${changed} reviewed matches accepted`);
+  touchInventory();
+  if (!persistDatabase("BOM matches accepted", { dirty: true })) return;
+  state.selectedBomRowIds.clear();
+  render();
+}
+
+function unlinkSelectedBomMatches() {
+  const ids = [...state.selectedBomRowIds];
+  if (!ids.length) {
+    toast("select BOM rows first", "error");
+    return;
+  }
+  const changed = unlinkProjectBomRows(ids);
+  if (!changed) {
+    toast("selected rows had no matches to clear", "error");
+    return;
+  }
+  logActivity("unlink-bom-matches", "project", activeProject()?.id || 0, `${changed} selected matches cleared`);
+  touchInventory();
+  if (!persistDatabase("BOM matches cleared", { dirty: true })) return;
+  state.selectedBomRowIds.clear();
+  render();
+}
+
+function applySelectedProjectRepair(projectId) {
+  const analysis = state.projectRepairAnalysis?.projectId === Number(projectId) ? state.projectRepairAnalysis : analyzeProjectRepair(projectId);
+  const selectedIds = new Set($$("[data-repair-select]").filter((input) => input.checked).map((input) => input.value));
+  const changes = analysis.changes.filter((change) => selectedIds.has(change.id));
+  if (!changes.length) {
+    toast("select repair changes first", "error");
+    return;
+  }
+  const applied = applyProjectRepair(projectId, changes);
+  if (!applied) {
+    toast("repair made no changes", "error");
+    return;
+  }
+  touchInventory();
+  if (!persistDatabase("project repair applied", { dirty: true })) return;
+  state.projectRepairAnalysis = analyzeProjectRepair(projectId);
+  toast(`applied ${applied} repair change${applied === 1 ? "" : "s"}`);
+  render();
+}
+
+function restoreRepairBackupAction() {
+  if (!localStorage.getItem(STORAGE.repairBackup)) {
+    toast("no repair backup found", "error");
+    return;
+  }
+  if (!confirm("Restore the inventory snapshot from before the last project repair?")) return;
+  if (!restoreLastRepairBackup()) {
+    toast("repair backup restore failed", "error");
+    return;
+  }
+  if (!persistDatabase("repair backup restored", { dirty: true })) return;
+  toast("repair backup restored");
+  render();
 }
 
 function selectVisibleParts() {

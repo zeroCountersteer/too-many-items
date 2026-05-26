@@ -4,6 +4,7 @@ const KICAD_PARSER_VERSION = "tmi-kicad-sexpr-v1";
 const PROJECT_TABS = [
   ["overview", "Overview"],
   ["source", "Source Import"],
+  ["match", "Match Review"],
   ["guide", "Build Guide"],
   ["bom", "BOM"],
   ["history", "History"]
@@ -57,7 +58,8 @@ function renderProjectManagerView() {
       <h3 class="view-title">project manager</h3>
       <div class="action-row">
         <button type="button" data-action="project-tab" data-tab="source">import source</button>
-        <button type="button" data-action="auto-match-project" data-id="${project.id}">auto-match</button>
+        <button type="button" data-action="project-tab" data-tab="match">match review</button>
+        <button type="button" data-action="preview-project-repair" data-id="${project.id}">preview repair</button>
         <button type="button" data-action="open-edit-project" data-id="${project.id}">edit project</button>
         <button type="button" data-action="reserve-project" data-id="${project.id}">reserve</button>
         <button type="button" data-action="release-project" data-id="${project.id}">release</button>
@@ -95,6 +97,7 @@ function renderProjectManagerView() {
 
 function renderProjectTabContent(project) {
   if (state.activeProjectTab === "source") return renderProjectSourceImport(project);
+  if (state.activeProjectTab === "match") return renderProjectMatchReview(project);
   if (state.activeProjectTab === "guide") return renderProjectBuildGuide(project);
   if (state.activeProjectTab === "bom") {
     const q = String(state.projectQuery || "").toLowerCase();
@@ -116,6 +119,149 @@ function renderProjectTabContent(project) {
   }
   if (state.activeProjectTab === "history") return renderProjectHistory(project);
   return renderProjectOverview(project);
+}
+
+function renderProjectMatchReview(project) {
+  const health = projectHealth(project.id);
+  const filter = state.projectMatchFilter || "all";
+  const selected = state.selectedBomRowIds || new Set();
+  const rows = projectBomRows(project.id).filter((row) => {
+    const candidate = getBomMatchCandidates(row, { limit: 1 })[0];
+    const hasWarnings = !!candidate?.warnings.length || !!candidate?.rowWarnings.length || bomMatchContext(row).warnings.length > 0;
+    if (filter === "unresolved") return row.fitted !== 0 && !row.partId;
+    if (filter === "warnings") return hasWarnings;
+    if (filter === "dnp") return row.fitted === 0;
+    return true;
+  });
+  const exactCount = projectBomRows(project.id).filter((row) => row.fitted !== 0 && !row.partId && getBomMatchCandidates(row, { limit: 1 })[0]?.confidence === "exact").length;
+  return `<section class="panel match-review-panel">
+    <div class="panel-head match-review-head">
+      <div>
+        <h4>Match Review</h4>
+        <p>${health.unresolved} unresolved / ${exactCount} exact candidates / ${health.warnings} warnings</p>
+      </div>
+      <div class="action-row">
+        <select data-project-match-filter>
+          <option value="all" ${filter === "all" ? "selected" : ""}>all BOM rows</option>
+          <option value="unresolved" ${filter === "unresolved" ? "selected" : ""}>unresolved</option>
+          <option value="warnings" ${filter === "warnings" ? "selected" : ""}>warnings</option>
+          <option value="dnp" ${filter === "dnp" ? "selected" : ""}>DNP</option>
+        </select>
+        <button type="button" class="primary-button" data-action="accept-selected-matches" data-id="${project.id}">accept selected</button>
+        <button type="button" data-action="accept-all-exact" data-id="${project.id}">accept all exact</button>
+        <button type="button" data-action="unlink-selected-matches" data-id="${project.id}">clear selected matches</button>
+        <button type="button" data-action="clear-bom-review-selection">clear selection</button>
+      </div>
+    </div>
+    ${renderProjectHealthPanel(project)}
+    ${renderMatchReviewTable(project, rows, selected)}
+    ${renderRepairPreview(project)}
+  </section>`;
+}
+
+function renderProjectHealthPanel(project) {
+  const health = projectHealth(project.id);
+  return `<div class="project-health-grid">
+    ${summaryChipHtml(health.unresolved, "unresolved", health.unresolved ? "warn" : "")}
+    ${summaryChipHtml(health.dnpRows, "DNP")}
+    ${summaryChipHtml(health.missingPrices, "missing prices", health.missingPrices ? "warn" : "")}
+    ${summaryChipHtml(health.invalidLinks, "invalid links", health.invalidLinks ? "warn" : "")}
+    ${summaryChipHtml(health.sourceWarnings, "source warnings", health.sourceWarnings ? "warn" : "")}
+    ${summaryChipHtml(health.placementIssues, "placement issues", health.placementIssues ? "warn" : "")}
+    ${summaryChipHtml(health.shortages, "shortages", health.shortages ? "warn" : "")}
+  </div>`;
+}
+
+function renderMatchReviewTable(project, rows, selected) {
+  const body = rows.map((row) => {
+    const current = row.partId ? state.inventory.parts.find((part) => part.id === row.partId) : null;
+    const candidate = getBomMatchCandidates(row, { limit: 1 })[0] || null;
+    const status = bomRowStatus(row);
+    const cost = candidate?.partId ? partPriceInfo(candidate.partId) : null;
+    const warnings = [...(candidate?.rowWarnings || []), ...(candidate?.warnings || [])];
+    const checked = selected.has(row.id) ? "checked" : "";
+    return `<tr class="${row.fitted === 0 ? "review-dnp-row" : ""} ${warnings.length ? "review-warning-row" : ""}">
+      <td class="select-cell"><input type="checkbox" data-bom-review-select value="${row.id}" ${checked} /></td>
+      <td><span class="cell-truncate mono-cell" title="${escapeAttr(row.referencesText || "")}">${escapeHtml(row.referencesText || "")}</span></td>
+      <td>${row.quantity}</td>
+      <td><span class="cell-truncate" title="${escapeAttr(row.value || "")}">${escapeHtml(row.value || "")}</span></td>
+      <td><span class="cell-truncate mono-cell" title="${escapeAttr(row.footprint || "")}">${escapeHtml(shortFootprint(row.footprint || ""))}</span></td>
+      <td>${current ? `<button type="button" class="link-button cell-truncate" data-action="open-edit-part" data-id="${current.id}" title="${escapeAttr(current.name)}">${escapeHtml(current.name)}</button>` : `<span class="muted">unmatched</span>`}</td>
+      <td>${candidate ? renderCandidateCell(candidate) : `<span class="danger-text">no candidate</span>`}</td>
+      <td><span class="badge confidence-${escapeAttr(candidate?.confidence || "none")}">${escapeHtml(candidate?.confidence || "none")}</span></td>
+      <td>${candidate?.score ? Math.round(candidate.score) : "-"}</td>
+      <td><span class="cell-truncate" title="${escapeAttr((candidate?.reasons || []).join(" / "))}">${escapeHtml((candidate?.reasons || []).join(" / ") || "-")}</span></td>
+      <td><span class="cell-truncate ${warnings.length ? "danger-text" : "muted"}" title="${escapeAttr(warnings.join(" / "))}">${escapeHtml(warnings.join(" / ") || "-")}</span></td>
+      <td>${candidate ? candidate.available : "-"}</td>
+      <td>${status.shortage ? `<span class="qty-low">${status.shortage}</span>` : `<span class="qty-ok">0</span>`}</td>
+      <td>${cost?.unitPrice == null ? `<span class="muted">missing</span>` : escapeHtml(formatMoney(cost.unitPrice, cost.currency))}</td>
+      <td><span class="badge status-chip ${row.fitted === 0 ? "skipped" : "done"}">${row.fitted === 0 ? "DNP" : "fit"}</span></td>
+      <td class="action-cell">
+        <div class="row-action-grid">
+          ${candidate ? `<button type="button" class="small-button" data-action="accept-bom-row-match" data-id="${row.id}">accept</button>` : ""}
+          <button type="button" class="small-button" data-action="open-edit-bom-row" data-id="${row.id}">edit</button>
+        </div>
+      </td>
+    </tr>`;
+  }).join("");
+  return `<div class="table-wrap match-review-wrap"><table class="data-table match-review-table">
+    <colgroup>
+      <col class="col-select" />
+      <col class="col-refs" />
+      <col class="col-qty" />
+      <col class="col-value" />
+      <col class="col-footprint" />
+      <col class="col-current" />
+      <col class="col-candidate" />
+      <col class="col-confidence" />
+      <col class="col-score" />
+      <col class="col-reasons" />
+      <col class="col-warnings" />
+      <col class="col-stock" />
+      <col class="col-shortage" />
+      <col class="col-price" />
+      <col class="col-fit" />
+      <col class="col-actions" />
+    </colgroup>
+    <thead><tr>
+      <th class="select-cell"><input type="checkbox" data-bom-review-select-all /></th>
+      <th>Refs</th><th>Qty</th><th>Value</th><th>Footprint</th><th>Current</th><th>Candidate</th><th>Confidence</th><th>Score</th><th>Reasons</th><th>Warnings</th><th>Stock</th><th>Short</th><th>Unit</th><th>Fit</th><th>Actions</th>
+    </tr></thead>
+    <tbody>${body || `<tr><td colspan="16">No BOM rows for this filter.</td></tr>`}</tbody>
+  </table></div>`;
+}
+
+function renderCandidateCell(candidate) {
+  return `<button type="button" class="link-button cell-truncate" data-action="open-edit-part" data-id="${candidate.partId}" title="${escapeAttr(candidate.partName)}">${escapeHtml(candidate.partName)}</button>`;
+}
+
+function renderRepairPreview(project) {
+  const analysis = state.projectRepairAnalysis?.projectId === project.id ? state.projectRepairAnalysis : null;
+  if (!analysis) {
+    return `<div class="repair-preview compact-repair">
+      <button type="button" data-action="preview-project-repair" data-id="${project.id}">preview repair</button>
+      <span class="small-note">Checks stale matches, invalid links, DNP flags, placements, and build-step links.</span>
+    </div>`;
+  }
+  const changes = analysis.changes.map((change) => `<label class="repair-row">
+    <input type="checkbox" data-repair-select value="${escapeAttr(change.id)}" checked />
+    <span>${escapeHtml(change.label)}</span>
+  </label>`).join("");
+  const warnings = analysis.warnings.map((warning) => `<li>${escapeHtml(warning)}</li>`).join("");
+  return `<div class="repair-preview">
+    <div class="panel-head">
+      <div>
+        <h4>Repair preview</h4>
+        <p>${analysis.changes.length} changes / ${analysis.warnings.length} warnings</p>
+      </div>
+      <div class="action-row">
+        <button type="button" class="primary-button" data-action="apply-project-repair" data-id="${project.id}">apply selected repair</button>
+        <button type="button" data-action="preview-project-repair" data-id="${project.id}">refresh preview</button>
+      </div>
+    </div>
+    ${changes ? `<div class="repair-list">${changes}</div>` : `<p class="small-note">No repair changes suggested.</p>`}
+    ${warnings ? `<ul class="warning-list">${warnings}</ul>` : ""}
+  </div>`;
 }
 
 function renderProjectOverview(project) {
@@ -535,12 +681,11 @@ async function importKiCadSourceFromForm() {
     }
 
     replaceProjectSourceData(project, parsed, now);
-    const matched = autoMatchProject(project.id);
-    logActivity("import-kicad-source", "project", project.id, `${parsed.components.length} refs, ${matched} auto-matched`);
+    logActivity("import-kicad-source", "project", project.id, `${parsed.components.length} refs imported for match review`);
     touchInventory();
     if (!persistDatabase("KiCad project imported", { dirty: true })) return;
     state.activeProjectId = project.id;
-    state.activeProjectTab = "guide";
+    state.activeProjectTab = "match";
     localStorage.setItem(STORAGE.activeProjectId, String(project.id));
     setView("projects");
     toast(`KiCad source imported: ${project.name}`);
@@ -575,23 +720,17 @@ function replaceProjectSourceData(project, parsed, now) {
   const groups = groupKiCadComponents(parsed.components);
   const bomByGroup = new Map();
   groups.forEach((group) => {
-    const match = findBestPartForBomRow({
-      value: group.value,
-      footprint: group.footprint,
-      mpn: group.mpn,
-      referencesText: group.references.join(" ")
-    });
     const row = {
       id: nextId(state.inventory.projectBom),
       projectId: project.id,
-      partId: match?.id || null,
+      partId: null,
       value: group.value || null,
       footprint: group.footprint || null,
       mpn: group.mpn || null,
       referencesText: group.references.join(" "),
       quantity: group.references.length,
       fitted: group.dnp ? 0 : 1,
-      notes: match ? null : "unresolved"
+      notes: null
     };
     state.inventory.projectBom.push(row);
     bomByGroup.set(group.key, row);
@@ -624,8 +763,8 @@ function replaceProjectSourceData(project, parsed, now) {
 function renderKiCadSourcePreview(parsed) {
   const groups = groupKiCadComponents(parsed.components);
   const rows = groups.slice(0, 60).map((group) => {
-    const match = findBestPartForBomRow({ value: group.value, footprint: group.footprint, mpn: group.mpn, referencesText: group.references.join(" ") });
-    return `<tr><td>${escapeHtml(group.references.join(" "))}</td><td>${group.references.length}</td><td>${escapeHtml(group.value || "")}</td><td>${escapeHtml(group.footprint || "")}</td><td>${escapeHtml(group.mpn || "")}</td><td>${group.dnp ? "DNP" : "yes"}</td><td>${match ? escapeHtml(match.name) : `<span class="danger-text">unresolved</span>`}</td></tr>`;
+    const candidate = getBomMatchCandidates({ value: group.value, footprint: group.footprint, mpn: group.mpn, referencesText: group.references.join(" ") }, { limit: 1 })[0];
+    return `<tr><td>${escapeHtml(group.references.join(" "))}</td><td>${group.references.length}</td><td>${escapeHtml(group.value || "")}</td><td>${escapeHtml(group.footprint || "")}</td><td>${escapeHtml(group.mpn || "")}</td><td>${group.dnp ? "DNP" : "yes"}</td><td>${candidate ? `${escapeHtml(candidate.partName)} <span class="muted">(${escapeHtml(candidate.confidence)})</span>` : `<span class="danger-text">no candidate</span>`}</td></tr>`;
   }).join("");
   return `<p class="section-title">preview / ${parsed.components.length} references / ${groups.length} BOM groups / ${parsed.sources.length} source files</p>
     ${parsed.warnings.length ? `<p class="small-note danger-text">${escapeHtml(parsed.warnings.slice(0, 4).join(" / "))}</p>` : ""}
@@ -1077,8 +1216,8 @@ function editorBatchSet(action) {
     if (action === "match") setEditorCell(row, "partId", $("#editorBatchPart")?.value);
     if (action === "auto-match") {
       const rowData = readEditorRow(row);
-      const part = findBestPartForBomRow(rowData);
-      if (part) setEditorCell(row, "partId", part.id);
+      const candidate = getBomMatchCandidates(rowData, { limit: 1 })[0];
+      if (candidate && ["exact", "strong"].includes(candidate.confidence)) setEditorCell(row, "partId", candidate.partId);
     }
   });
 }

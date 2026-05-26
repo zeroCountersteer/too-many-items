@@ -1,4 +1,5 @@
 import { createStaticServer } from "./static-server.mjs";
+import { readFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -54,17 +55,24 @@ try {
   const matcherProbe = await page.evaluate(() => {
     const rows = [
       { referencesText: "R1 R2", value: "5.1k", footprint: "Resistor_SMD:R_0603_1608Metric_Pad0.98x0.95mm_HandSolder" },
+      { referencesText: "R1 R2", value: "5K1", footprint: "Resistor_SMD:R_1608Metric" },
+      { referencesText: "R9", value: "4k7", footprint: "R_0603_1608Metric" },
       { referencesText: "R3 R4", value: "22R", footprint: "Resistor_SMD:R_0603_1608Metric_Pad0.98x0.95mm_HandSolder" },
       { referencesText: "R5 R6", value: "100k", footprint: "Resistor_SMD:R_0603_1608Metric_Pad0.98x0.95mm_HandSolder" },
       { referencesText: "R7 R8", value: "10k", footprint: "Resistor_SMD:R_0603_1608Metric_Pad0.98x0.95mm_HandSolder" },
+      { referencesText: "C1 C2", value: "100n", footprint: "Capacitor_SMD:C_1608Metric" },
+      { referencesText: "C1 C2", value: "104", footprint: "Capacitor_SMD:C_0603_1608Metric" },
       { referencesText: "C1 C2", value: "10uF 10V", footprint: "Capacitor_SMD:C_0603_1608Metric_Pad1.08x0.95mm_HandSolder" },
       { referencesText: "C3 C4", value: "0.1uF 50V", footprint: "Capacitor_SMD:C_0603_1608Metric_Pad1.08x0.95mm_HandSolder" }
     ];
-    return rows.map((row) => window.findBestPartForBomRow(row)?.name || "");
+    return rows.map((row) => {
+      const candidate = window.getBomMatchCandidates(row, { limit: 1 })[0];
+      return { value: row.value, name: candidate?.partName || "", confidence: candidate?.confidence || "", score: candidate?.score || 0 };
+    });
   });
-  for (const expected of ["5.1k", "22R", "100k", "10k", "10uF", "100nF"]) {
-    if (!matcherProbe.some((name) => name.includes(expected))) {
-      throw new Error(`BOM matcher did not resolve ${expected}; got ${matcherProbe.join(" | ")}`);
+  for (const expected of ["5.1k", "4.7k", "22R", "100k", "10k", "10uF", "100nF"]) {
+    if (!matcherProbe.some((item) => item.name.includes(expected) && item.confidence === "exact")) {
+      throw new Error(`BOM matcher did not resolve ${expected}; got ${JSON.stringify(matcherProbe)}`);
     }
   }
   const badMatch = await page.evaluate(() => window.findBestPartForBomRow({ referencesText: "C", value: "C", footprint: "" })?.name || "");
@@ -127,11 +135,7 @@ try {
   await page.click('[data-view="add"]');
   await page.fill('#kicadBomForm [name="projectName"]', "Smoke Board");
   await page.fill('#kicadBomForm [name="revision"]', "rev smoke");
-  await page.fill('#kicadBomForm [name="bomCsv"]', [
-    'RefList;Count;Thing;LandPattern;Catalog',
-    'R1 R2;2;10k;R_0603_1608Metric;',
-    'C1;1;100nF;C_0603_1608Metric;'
-  ].join("\n"));
+  await page.fill('#kicadBomForm [name="bomCsv"]', readFileSync(path.join(root, "scripts", "fixtures", "existing-project-bom.csv"), "utf8"));
   await page.click('#kicadBomForm [data-action="preview-bom-import"]');
   await page.selectOption('[data-bom-map="references"]', { label: "RefList" });
   await page.selectOption('[data-bom-map="value"]', { label: "Thing" });
@@ -140,6 +144,26 @@ try {
   await page.click('#kicadBomForm [data-action="import-kicad-bom"]');
   await page.waitForFunction(() => document.querySelector('[data-view="projects"]')?.classList.contains("active"), { timeout: 10000 });
   if (!await page.locator("text=Smoke Board").count()) throw new Error("BOM import did not route to Projects.");
+  await page.locator(".match-review-panel", { hasText: "Match Review" }).waitFor({ timeout: 10000 });
+  const reviewBeforeAccept = await page.textContent(".match-review-panel");
+  if (!reviewBeforeAccept?.includes("unmatched")) throw new Error("Review-first BOM import should not persist matches before approval.");
+  await page.click('[data-action="accept-all-exact"]');
+  await page.waitForTimeout(250);
+  const reviewAfterAccept = await page.textContent(".match-review-panel");
+  if (!reviewAfterAccept?.includes("10k")) throw new Error("Accept all exact did not apply reviewed BOM matches.");
+  await page.click('[data-action="preview-project-repair"]');
+  await page.waitForTimeout(250);
+  if (!await page.locator(".repair-preview", { hasText: "DNP flag" }).count()) throw new Error("Repair preview did not detect stale DNP candidate.");
+  await page.click('[data-action="apply-project-repair"]');
+  await page.waitForTimeout(250);
+  await page.click('[data-action="accept-all-exact"]');
+  await page.waitForTimeout(250);
+  const repairProbe = await page.evaluate(() => ({
+    hasBackup: !!localStorage.getItem("tmi.v3.repair.backup"),
+    analysis: window.analyzeProjectRepair(window.activeProject().id)
+  }));
+  if (!repairProbe.hasBackup) throw new Error("Project repair did not create a local backup.");
+  if (repairProbe.analysis.health.dnpRows !== 0) throw new Error("Project repair did not clear the stale DNP row.");
   const projectText = await page.textContent(".project-detail");
   if (!projectText?.includes("BOM total")) throw new Error("Project cost summary did not render.");
   if (!projectText?.includes("USD")) throw new Error("Project cost summary did not use the default currency.");
@@ -151,6 +175,12 @@ try {
   await page.click('[data-action="preview-kicad-source"]');
   await page.locator("#kicadSourcePreview", { hasText: "R1" }).waitFor({ timeout: 10000 });
   await page.click('[data-action="import-kicad-source"]');
+  await page.locator(".match-review-panel", { hasText: "Match Review" }).waitFor({ timeout: 10000 });
+  const sourceReviewText = await page.textContent(".match-review-panel");
+  if (!sourceReviewText?.includes("unmatched")) throw new Error("KiCad source import should route to match review before build guide.");
+  await page.click('[data-action="accept-all-exact"]');
+  await page.waitForTimeout(250);
+  await page.click('[data-action="project-tab"][data-tab="guide"]');
   await page.waitForFunction(() => document.querySelector(".build-guide-panel"), { timeout: 10000 });
   const guideText = await page.textContent(".build-guide-panel");
   if (!guideText?.includes("R1") || !guideText?.includes("iBOM build guide")) throw new Error("KiCad source import did not route to the build guide.");

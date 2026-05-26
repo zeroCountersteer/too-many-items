@@ -1272,6 +1272,7 @@ function availableForPart(partId, excludeProjectId = null) {
 function bomRowStatus(row) {
   const partId = Number(row.partId || 0);
   const need = numberOrZero(row.quantity);
+  if (row.fitted === 0) return { matched: !!partId, available: 0, reserved: 0, shortage: 0, ok: true, dnp: true };
   if (!partId) return { matched: false, available: 0, reserved: 0, shortage: need, ok: false };
   const available = availableForPart(partId, row.projectId);
   const reserved = projectReservedQuantity(row.projectId, partId);
@@ -1282,40 +1283,33 @@ function bomRowStatus(row) {
 
 function projectSummary(projectId) {
   const rows = projectBomRows(projectId);
-  const needed = rows.reduce((sum, row) => sum + numberOrZero(row.quantity), 0);
-  const unresolved = rows.filter((row) => !row.partId).length;
-  const shortageRows = rows.filter((row) => bomRowStatus(row).shortage > 0).length;
+  const activeRows = rows.filter((row) => row.fitted !== 0);
+  const needed = activeRows.reduce((sum, row) => sum + numberOrZero(row.quantity), 0);
+  const unresolved = activeRows.filter((row) => !row.partId).length;
+  const shortageRows = activeRows.filter((row) => bomRowStatus(row).shortage > 0).length;
   const reserved = reservationsForProject(projectId).reduce((sum, row) => sum + numberOrZero(row.quantity), 0);
-  return { rows: rows.length, needed, unresolved, shortageRows, reserved };
+  return { rows: rows.length, needed, unresolved, shortageRows, reserved, dnpRows: rows.length - activeRows.length };
 }
 
 function findBestPartForBomRow(row) {
-  const mpn = String(row.mpn || "").trim().toLowerCase();
-  if (mpn) {
-    const byMpn = state.inventory.parts.find((part) => String(part.mpn || "").trim().toLowerCase() === mpn);
-    if (byMpn) return byMpn;
-    const alias = (state.inventory.partAliases || []).find((item) => String(item.aliasValue || "").trim().toLowerCase() === mpn);
-    if (alias) return state.inventory.parts.find((part) => part.id === alias.partId) || null;
-  }
+  const best = getBomMatchCandidates(row, { limit: 1 })[0];
+  return best && ["exact", "strong"].includes(best.confidence) ? best.part : null;
+}
 
+function getBomMatchCandidates(row, options = {}) {
   const ctx = bomMatchContext(row);
-  const scored = state.inventory.parts
-    .map((part) => ({ part, score: scorePartForBom(part, ctx) }))
-    .filter((item) => item.score > 0)
-    .sort((a, b) => b.score - a.score || stockSummary(b.part.id).total - stockSummary(a.part.id).total || a.part.id - b.part.id);
-
-  const best = scored[0];
-  if (best && best.score >= (ctx.kind ? 90 : 45)) return best.part;
-
-  const value = String(row.value || "").trim().toLowerCase();
-  const footprint = String(row.footprint || "").trim().toLowerCase();
-  if (value.length < 2) return null;
-  return state.inventory.parts.find((part) => {
-    const name = String(part.name || "").toLowerCase();
-    const pkg = String(part.package || "").toLowerCase();
-    const fp = String(part.footprint || "").toLowerCase();
-    return (!value || name.includes(value)) && (!footprint || fp.includes(footprint) || pkg.includes(footprint));
-  }) || null;
+  const limit = Number(options.limit || 6);
+  const candidates = state.inventory.parts
+    .map((part) => scorePartForBomCandidate(part, ctx))
+    .filter(Boolean)
+    .sort((a, b) => b.score - a.score || b.available - a.available || a.part.id - b.part.id)
+    .slice(0, limit);
+  return candidates.map((candidate, index) => ({
+    ...candidate,
+    rank: index + 1,
+    confidence: candidateConfidence(candidate, ctx),
+    rowWarnings: ctx.warnings
+  }));
 }
 
 function bomMatchContext(row) {
@@ -1323,6 +1317,12 @@ function bomMatchContext(row) {
   const footprint = textValue(row.footprint || row.package);
   const references = textValue(row.referencesText || row.references || row.ref || row.refs);
   const kind = inferBomKind({ value, footprint, references });
+  const parsedValue = parseBomElectricalValue(kind, value);
+  const packageToken = extractPackageToken([footprint, value].join(" "));
+  const warnings = [];
+  if (!kind && (value || footprint || references)) warnings.push("type not inferred");
+  if (kind && parsedValue == null) warnings.push("value not parsed");
+  if (!packageToken && footprint) warnings.push("package not normalized");
   return {
     row,
     value,
@@ -1331,9 +1331,10 @@ function bomMatchContext(row) {
     footprintNorm: normalizeMatchText(footprint),
     references,
     kind,
-    packageToken: extractPackageToken([footprint, value].join(" ")),
-    parsedValue: parseBomElectricalValue(kind, value),
-    voltage: parseBomVoltage(value)
+    packageToken,
+    parsedValue,
+    voltage: parseBomVoltage(value),
+    warnings
   };
 }
 
@@ -1341,22 +1342,24 @@ function inferBomKind({ value, footprint, references }) {
   const ref = String(references || "").trim().match(/^([A-Za-z]+)/)?.[1]?.toUpperCase() || "";
   const fp = String(footprint || "").toLowerCase();
   const text = `${value || ""} ${footprint || ""}`.toLowerCase();
-  if (ref === "R" || fp.includes("resistor") || /^r_/.test(fp) || /\d\s*(r|k|m)(\s|$)/i.test(text)) return "resistor";
-  if (ref === "C" || fp.includes("capacitor") || /^c_/.test(fp) || /\d\s*(p|n|u|\u00b5|\u03bc|m)?f(\s|$)/i.test(text)) return "capacitor";
-  if (ref === "L" || fp.includes("inductor") || /^l_/.test(fp) || /\d\s*(n|u|\u00b5|\u03bc|m)?h(\s|$)/i.test(text)) return "inductor";
+  if (ref === "R" || fp.includes("resistor") || /(^|[:/_-])r[_-]/.test(fp) || /\d\s*(r|k|m)(\s|$)/i.test(text)) return "resistor";
+  if (ref === "C" || fp.includes("capacitor") || /(^|[:/_-])c[_-]/.test(fp) || /\d\s*(p|n|u|\u00b5|\u03bc|m)?f?(\s|$)/i.test(text) && /\b(?:pf|nf|uf|mf|f|capacitor|c_)/i.test(text)) return "capacitor";
+  if (ref === "L" || fp.includes("inductor") || /(^|[:/_-])l[_-]/.test(fp) || /\d\s*(n|u|\u00b5|\u03bc|m)?h(\s|$)/i.test(text)) return "inductor";
   return null;
 }
 
 function parseBomElectricalValue(kind, value) {
-  const text = String(value || "").replace("\u00b5", "u").replace("\u03bc", "u");
+  const text = String(value || "").replace("\u00b5", "u").replace("\u03bc", "u").replace("\u03a9", "R");
   if (kind === "resistor") {
-    const token = text.match(/(?:^|[^A-Za-z0-9.])([0-9]+(?:[.,][0-9]+)?\s*(?:[rRkKmM](?:[0-9]+)?|ohms?|\u03a9))(?:[^A-Za-z0-9.]|$)/)?.[1]
+    const token = text.match(/(?:^|[^A-Za-z0-9.])([0-9]+(?:[.,][0-9]+)?\s*(?:[rRkKmM](?:[0-9]+)?|ohms?))(?:[^A-Za-z0-9.]|$)/)?.[1]
       || text.match(/^([0-9]+(?:[.,][0-9]+)?\s*[rRkKmM]?)(?:\s|$)/)?.[1];
     return token ? parseResistance(token) : null;
   }
   if (kind === "capacitor") {
-    const token = text.match(/(?:^|[^A-Za-z0-9.])([0-9]+(?:[.,][0-9]+)?\s*(?:pF|nF|uF|mF|F|p|n|u|m)(?:[0-9]+)?)(?:[^A-Za-z0-9.]|$)/i)?.[1];
-    return token ? parseCapacitance(token) : null;
+    const token = text.match(/(?:^|[^A-Za-z0-9.])([0-9]+(?:[.,][0-9]+)?\s*(?:pF|nF|uF|mF|F|p|n|u|m)(?:[0-9]+)?)(?:[^A-Za-z0-9.]|$)/i)?.[1]
+      || text.match(/^([0-9]{2,3})(?:\s|$)/)?.[1];
+    if (!token) return null;
+    return /^[0-9]{2,3}$/.test(token) ? parseCapacitorCode(token) : parseCapacitance(token);
   }
   if (kind === "inductor") {
     const token = text.match(/(?:^|[^A-Za-z0-9.])([0-9]+(?:[.,][0-9]+)?\s*(?:nH|uH|mH|H|n|u|m)(?:[0-9]+)?)(?:[^A-Za-z0-9.]|$)/i)?.[1];
@@ -1365,42 +1368,118 @@ function parseBomElectricalValue(kind, value) {
   return null;
 }
 
+function parseCapacitorCode(value) {
+  const digits = String(value || "").trim();
+  if (!/^[0-9]{2,3}$/.test(digits)) return null;
+  if (digits.length === 2) return Number(digits) * 1e-12;
+  const base = Number(digits.slice(0, 2));
+  const multiplier = Number(digits[2]);
+  return Number.isFinite(base) && Number.isFinite(multiplier) ? base * (10 ** multiplier) * 1e-12 : null;
+}
+
 function parseBomVoltage(value) {
   const match = String(value || "").replace(",", ".").match(/([0-9]+(?:\.[0-9]+)?)\s*v\b/i);
   return match ? Number(match[1]) : null;
 }
 
-function scorePartForBom(part, ctx) {
+function scorePartForBomCandidate(part, ctx) {
+  const reasons = [];
+  const warnings = [];
   let score = 0;
   const partKind = categoryKind(getCategoryName(part.categoryId));
+  const partMpn = normalizeMatchText(part.mpn);
+  const rowMpn = normalizeMatchText(ctx.row?.mpn);
+  if (rowMpn) {
+    if (partMpn && partMpn === rowMpn) {
+      score += 160;
+      reasons.push("MPN exact");
+    } else {
+      const alias = (state.inventory.partAliases || []).find((item) => item.partId === part.id && normalizeMatchText(item.aliasValue) === rowMpn);
+      if (alias) {
+        score += 150;
+        reasons.push("alias exact");
+      }
+    }
+  }
+
   if (ctx.kind) {
-    if (partKind !== ctx.kind) return 0;
+    if (partKind !== ctx.kind) return null;
     score += 35;
+    reasons.push(ctx.kind);
   }
 
   const spec = ctx.kind ? getSpec(part.id, ctx.kind) : null;
   const specValue = spec ? bomComparableSpecValue(ctx.kind, spec) : null;
   if (ctx.kind && ctx.parsedValue != null) {
-    if (specValue == null || !nearlyEqualElectrical(specValue, ctx.parsedValue)) return 0;
-    score += 90;
+    if (specValue == null) {
+      warnings.push("part missing normalized spec");
+      return null;
+    }
+    if (!nearlyEqualElectrical(specValue, ctx.parsedValue)) return null;
+    score += 100;
+    reasons.push("value exact");
   } else if (ctx.valueNorm && normalizeMatchText(part.name).includes(ctx.valueNorm)) {
-    score += 18;
+    score += 20;
+    reasons.push("name contains value");
   } else if (ctx.kind) {
-    return 0;
+    return null;
   }
 
   const partTokens = partPackageTokens(part);
-  if (ctx.packageToken && partTokens.has(ctx.packageToken)) score += 35;
-  else if (ctx.footprintNorm && [part.footprint, part.package].some((value) => normalizeMatchText(value).includes(ctx.footprintNorm) || ctx.footprintNorm.includes(normalizeMatchText(value)))) score += 12;
+  if (ctx.packageToken) {
+    if (partTokens.has(ctx.packageToken)) {
+      score += 40;
+      reasons.push(`package ${ctx.packageToken}`);
+    } else {
+      warnings.push(`package differs: BOM ${ctx.packageToken}, part ${[...partTokens].join("/") || "none"}`);
+      score -= 20;
+    }
+  } else if (ctx.footprint) {
+    warnings.push("BOM package not recognized");
+  }
 
   if (ctx.voltage != null && spec?.voltageV != null) {
     const voltage = Number(spec.voltageV);
-    if (Number.isFinite(voltage)) score += voltage >= ctx.voltage ? 8 : -20;
+    if (Number.isFinite(voltage) && voltage >= ctx.voltage) {
+      score += 8;
+      reasons.push(`voltage >= ${trimNumber(ctx.voltage)}V`);
+    } else {
+      warnings.push(`voltage below BOM: ${trimNumber(voltage)}V < ${trimNumber(ctx.voltage)}V`);
+      score -= 45;
+    }
+  } else if (ctx.voltage != null && ctx.kind === "capacitor") {
+    warnings.push("part voltage unknown");
   }
 
-  if (stockSummary(part.id).total > 0) score += 2;
   if (ctx.valueNorm && normalizeMatchText(part.name).includes(ctx.valueNorm)) score += 5;
-  return score;
+  const available = stockSummary(part.id).total;
+  if (available > 0) {
+    score += 2;
+    reasons.push("in stock");
+  }
+  if (score <= 0) return null;
+  const cost = partPriceInfo(part.id);
+  return {
+    part,
+    partId: part.id,
+    partName: part.name,
+    score,
+    reasons,
+    warnings,
+    available,
+    shortage: Math.max(0, numberOrZero(ctx.row?.quantity) - available),
+    unitPrice: cost.unitPrice,
+    currency: cost.currency,
+    missingPrice: cost.missingPrice,
+    mixedCurrency: cost.mixedCurrency
+  };
+}
+
+function candidateConfidence(candidate, ctx) {
+  const seriousWarning = candidate.warnings.some((warning) => /differs|below|unknown|missing/.test(warning));
+  if (candidate.score >= 165 && !seriousWarning && ctx.kind && ctx.parsedValue != null && ctx.packageToken) return "exact";
+  if (candidate.score >= 135 && !candidate.warnings.some((warning) => /below/.test(warning))) return "strong";
+  return "review";
 }
 
 function bomComparableSpecValue(kind, spec) {
@@ -1424,9 +1503,20 @@ function normalizeMatchText(value) {
 
 function extractPackageToken(value) {
   const text = String(value || "").toLowerCase();
-  const match = text.match(/(?:^|[^0-9])(0201|0402|0603|0805|1206|1210|1812|2010|2512)(?:[^0-9]|$)/)
+  const match = text.match(/(?:^|[^0-9])(0201|0402|0603|0805|1206|1210|1812|2010|2512|1005|1608|2012|3216|3225|4532|5025|6432)(?:[^0-9]|$)/)
     || text.match(/\b(sot[-_ ]?23|sot[-_ ]?223|sod[-_ ]?123|sod[-_ ]?323|sod[-_ ]?523|qfn[-_ ]?\d+|tqfp[-_ ]?\d+|lqfp[-_ ]?\d+)\b/i);
-  return match ? match[1].replace(/[-_ ]/g, "") : "";
+  if (!match) return "";
+  const token = match[1].replace(/[-_ ]/g, "");
+  return ({
+    "1005": "0402",
+    "1608": "0603",
+    "2012": "0805",
+    "3216": "1206",
+    "3225": "1210",
+    "4532": "1812",
+    "5025": "2010",
+    "6432": "2512"
+  })[token] || token;
 }
 
 function partPackageTokens(part) {
@@ -1434,21 +1524,210 @@ function partPackageTokens(part) {
 }
 
 function autoMatchProject(projectId) {
-  let matched = 0;
+  return acceptProjectBomMatches(projectId, { mode: "exact", rowIds: projectBomRows(projectId).filter((row) => !row.partId).map((row) => row.id) });
+}
+
+function projectHealth(projectId) {
+  const rows = projectBomRows(projectId);
+  const partIds = new Set((state.inventory.parts || []).map((part) => part.id));
+  const bomRowIds = new Set(rows.map((row) => row.id));
+  const placements = projectPlacements(projectId);
+  const sessions = projectBuildSessions(projectId);
+  const sessionIds = new Set(sessions.map((row) => row.id));
+  const placementIds = new Set(placements.map((row) => row.id));
+  const sourceWarnings = projectSources(projectId).filter((row) => row.notes).length;
+  const activeRows = rows.filter((row) => row.fitted !== 0);
+  const invalidLinks = rows.filter((row) => row.partId && !partIds.has(row.partId)).length;
+  const placementIssues = placements.filter((row) => row.bomRowId && !bomRowIds.has(row.bomRowId)).length
+    + (state.inventory.projectBuildSteps || []).filter((row) => row.projectId === Number(projectId) && (!sessionIds.has(row.sessionId) || (row.placementId && !placementIds.has(row.placementId)) || (row.bomRowId && !bomRowIds.has(row.bomRowId)))).length;
+  return {
+    rows: rows.length,
+    activeRows: activeRows.length,
+    dnpRows: rows.length - activeRows.length,
+    unresolved: activeRows.filter((row) => !row.partId).length,
+    missingPrices: activeRows.filter((row) => row.partId && bomRowCost(row).missing).length,
+    invalidLinks,
+    sourceWarnings,
+    placementIssues,
+    shortages: activeRows.filter((row) => bomRowStatus(row).shortage > 0).length,
+    warnings: rows.filter((row) => getBomMatchCandidates(row, { limit: 1 })[0]?.warnings.length).length
+  };
+}
+
+function acceptProjectBomMatches(projectId, options = {}) {
+  const rowIds = new Set((options.rowIds || []).map(Number));
+  const mode = options.mode || "selected";
+  let changed = 0;
   projectBomRows(projectId).forEach((row) => {
-    if (row.partId) return;
-    const part = findBestPartForBomRow(row);
-    if (part) {
-      row.partId = part.id;
-      row.notes = null;
-      matched += 1;
+    if (row.fitted === 0) return;
+    if (rowIds.size && !rowIds.has(row.id)) return;
+    const candidate = getBomMatchCandidates(row, { limit: 1 })[0];
+    if (!candidate) return;
+    if (mode === "exact" && candidate.confidence !== "exact") return;
+    if (row.partId === candidate.partId) return;
+    row.partId = candidate.partId;
+    row.notes = removeNoteFragment(row.notes, "unresolved") || null;
+    changed += 1;
+  });
+  return changed;
+}
+
+function unlinkProjectBomRows(rowIds) {
+  const ids = new Set((rowIds || []).map(Number));
+  let changed = 0;
+  (state.inventory.projectBom || []).forEach((row) => {
+    if (!ids.has(row.id) || !row.partId) return;
+    row.partId = null;
+    row.notes = appendNoteText(row.notes, "unlinked for review");
+    changed += 1;
+  });
+  return changed;
+}
+
+function analyzeProjectRepair(projectId) {
+  const project = state.inventory.projects.find((item) => item.id === Number(projectId));
+  const rows = projectBomRows(projectId);
+  const partIds = new Set((state.inventory.parts || []).map((part) => part.id));
+  const bomRowIds = new Set(rows.map((row) => row.id));
+  const placements = projectPlacements(projectId);
+  const placementIds = new Set(placements.map((row) => row.id));
+  const sessions = projectBuildSessions(projectId);
+  const sessionIds = new Set(sessions.map((row) => row.id));
+  const changes = [];
+  const warnings = [];
+  if (!project) return { projectId: Number(projectId), changes, warnings: ["project not found"], health: projectHealth(projectId) };
+
+  rows.forEach((row) => {
+    const candidates = getBomMatchCandidates(row, { limit: 3 });
+    const best = candidates[0] || null;
+    if (row.partId && !partIds.has(row.partId)) {
+      changes.push({ id: `unlink-${row.id}`, type: "unlink-invalid-part", rowId: row.id, fromPartId: row.partId, label: `${row.referencesText || row.value || row.id}: remove missing part link ${row.partId}` });
+    }
+    if (!row.partId && row.fitted !== 0 && best && ["exact", "strong"].includes(best.confidence)) {
+      changes.push({ id: `match-${row.id}`, type: "match-row", rowId: row.id, partId: best.partId, partName: best.partName, confidence: best.confidence, score: best.score, label: `${row.referencesText || row.value || row.id}: match ${best.partName}` });
+    }
+    if (row.fitted === 0 && best?.confidence === "exact" && /^[RCL]\d/i.test(String(row.referencesText || ""))) {
+      changes.push({ id: `fit-${row.id}`, type: "set-fitted", rowId: row.id, fitted: 1, label: `${row.referencesText || row.value || row.id}: review stale DNP flag and mark fitted` });
+    }
+    if (row.fitted !== 0 && !best && bomMatchContext(row).warnings.length) {
+      warnings.push(`${row.referencesText || row.value || row.id}: ${bomMatchContext(row).warnings.join(", ")}`);
     }
   });
-  return matched;
+
+  placements.forEach((placement) => {
+    if (placement.bomRowId && !bomRowIds.has(placement.bomRowId)) {
+      const target = rows.find((row) => rowReferences(row).includes(placement.reference));
+      if (target) changes.push({ id: `link-placement-${placement.id}`, type: "link-placement", placementId: placement.id, bomRowId: target.id, label: `${placement.reference}: relink placement to BOM row ${target.id}` });
+      else warnings.push(`${placement.reference}: placement points at missing BOM row ${placement.bomRowId}`);
+    }
+  });
+
+  (state.inventory.projectBuildSteps || []).forEach((step) => {
+    if (step.projectId !== Number(projectId)) return;
+    if (!sessionIds.has(step.sessionId) || (step.placementId && !placementIds.has(step.placementId)) || (step.bomRowId && !bomRowIds.has(step.bomRowId))) {
+      changes.push({ id: `clear-step-${step.id}`, type: "clear-build-step-links", stepId: step.id, label: `build step ${step.id}: clear invalid placement/BOM links` });
+    }
+  });
+
+  const duplicateGroups = new Map();
+  rows.forEach((row) => {
+    const key = [row.value || "", row.footprint || "", row.mpn || "", row.fitted === 0 ? "dnp" : "fit"].map((value) => String(value).toLowerCase().trim()).join("|");
+    if (!duplicateGroups.has(key)) duplicateGroups.set(key, []);
+    duplicateGroups.get(key).push(row);
+  });
+  duplicateGroups.forEach((group) => {
+    if (group.length > 1) warnings.push(`duplicate BOM groups: ${group.map((row) => row.referencesText || row.id).join(" / ")}`);
+  });
+
+  return { projectId: Number(projectId), changes, warnings, health: projectHealth(projectId) };
+}
+
+function applyProjectRepair(projectId, approvedChanges = []) {
+  const changes = approvedChanges.length ? approvedChanges : analyzeProjectRepair(projectId).changes;
+  if (!changes.length) return 0;
+  localStorage.setItem(STORAGE.repairBackup, inventoryJson());
+  let applied = 0;
+  changes.forEach((change) => {
+    if (change.type === "match-row") {
+      const row = state.inventory.projectBom.find((item) => item.id === Number(change.rowId));
+      if (row && change.partId) {
+        row.partId = Number(change.partId);
+        row.notes = removeNoteFragment(row.notes, "unresolved") || null;
+        applied += 1;
+      }
+    }
+    if (change.type === "unlink-invalid-part") {
+      const row = state.inventory.projectBom.find((item) => item.id === Number(change.rowId));
+      if (row) {
+        row.partId = null;
+        row.notes = appendNoteText(row.notes, "invalid part link cleared");
+        applied += 1;
+      }
+    }
+    if (change.type === "set-fitted") {
+      const row = state.inventory.projectBom.find((item) => item.id === Number(change.rowId));
+      if (row) {
+        row.fitted = Number(change.fitted) === 0 ? 0 : 1;
+        row.notes = appendNoteText(row.notes, "DNP flag reviewed");
+        applied += 1;
+      }
+    }
+    if (change.type === "link-placement") {
+      const placement = (state.inventory.projectPlacements || []).find((item) => item.id === Number(change.placementId));
+      if (placement) {
+        placement.bomRowId = Number(change.bomRowId);
+        applied += 1;
+      }
+    }
+    if (change.type === "clear-build-step-links") {
+      const step = (state.inventory.projectBuildSteps || []).find((item) => item.id === Number(change.stepId));
+      if (step) {
+        step.placementId = null;
+        step.bomRowId = null;
+        applied += 1;
+      }
+    }
+  });
+  if (applied) logActivity("repair-project", "project", projectId, `${applied} repair changes applied`);
+  return applied;
+}
+
+function restoreLastRepairBackup() {
+  const backup = localStorage.getItem(STORAGE.repairBackup);
+  if (!backup) return false;
+  state.inventory = normalizeInventory(JSON.parse(backup));
+  invalidateIndexes();
+  touchInventory();
+  return true;
+}
+
+function rowReferences(row) {
+  return String(row.referencesText || row.references || "")
+    .split(/[\s,;]+/)
+    .map((item) => item.trim())
+    .filter(Boolean);
+}
+
+function removeNoteFragment(notes, fragment) {
+  const lower = String(fragment || "").toLowerCase();
+  return String(notes || "")
+    .split(";")
+    .map((item) => item.trim())
+    .filter((item) => item && !item.toLowerCase().includes(lower))
+    .join("; ");
+}
+
+function appendNoteText(notes, note) {
+  const existing = String(notes || "").trim();
+  if (!existing) return note;
+  if (existing.toLowerCase().includes(String(note).toLowerCase())) return existing;
+  return `${existing}; ${note}`;
 }
 
 function selectProject(projectId) {
   state.activeProjectId = Number(projectId) || 0;
+  state.selectedBomRowIds = new Set();
+  state.projectRepairAnalysis = null;
   localStorage.setItem(STORAGE.activeProjectId || "tmi.activeProjectId", String(state.activeProjectId));
   if (state.activeView === "projects") $("#viewPanel").innerHTML = renderProjectsView();
 }
@@ -1610,7 +1889,14 @@ window.availableForPart = availableForPart;
 window.bomRowStatus = bomRowStatus;
 window.projectSummary = projectSummary;
 window.findBestPartForBomRow = findBestPartForBomRow;
+window.getBomMatchCandidates = getBomMatchCandidates;
 window.autoMatchProject = autoMatchProject;
+window.projectHealth = projectHealth;
+window.acceptProjectBomMatches = acceptProjectBomMatches;
+window.unlinkProjectBomRows = unlinkProjectBomRows;
+window.analyzeProjectRepair = analyzeProjectRepair;
+window.applyProjectRepair = applyProjectRepair;
+window.restoreLastRepairBackup = restoreLastRepairBackup;
 window.selectProject = selectProject;
 window.deleteProject = deleteProject;
 window.matchBomRow = matchBomRow;
@@ -1694,7 +1980,14 @@ Object.assign(window, {
   bomRowStatus,
   projectSummary,
   findBestPartForBomRow,
+  getBomMatchCandidates,
   autoMatchProject,
+  projectHealth,
+  acceptProjectBomMatches,
+  unlinkProjectBomRows,
+  analyzeProjectRepair,
+  applyProjectRepair,
+  restoreLastRepairBackup,
   selectProject,
   deleteProject,
   matchBomRow,

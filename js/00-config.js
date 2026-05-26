@@ -2,7 +2,7 @@
 
 const SQLJS_CDN = "https://cdn.jsdelivr.net/npm/sql.js@1.10.3/dist/";
 const BUNDLED_DB_PATH = "data/inventory.db";
-const APP_VERSION = "v22.0.1";
+const APP_VERSION = "v23";
 const DEFAULT_THEME_ID = "workbench";
 const DEFAULT_REPO_OWNER = "zeroCountersteer";
 const DEFAULT_REPO_NAME = "too-many-items";
@@ -22,7 +22,8 @@ const STORAGE = {
   token: "tmi.v3.github.token",
   visibleColumns: "tmi.v3.visibleColumns",
   activeProjectId: "tmi.v3.activeProjectId",
-  renderLimit: "tmi.v3.renderLimit"
+  renderLimit: "tmi.v3.renderLimit",
+  repairBackup: "tmi.v3.repair.backup"
 };
 
 const DEFAULT_CATEGORIES = [
