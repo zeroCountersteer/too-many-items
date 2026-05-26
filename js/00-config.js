@@ -2,7 +2,7 @@
 
 const SQLJS_CDN = "https://cdn.jsdelivr.net/npm/sql.js@1.10.3/dist/";
 const BUNDLED_DB_PATH = "data/inventory.db";
-const APP_VERSION = "v22";
+const APP_VERSION = "v22.0.1";
 const DEFAULT_THEME_ID = "workbench";
 const DEFAULT_REPO_OWNER = "zeroCountersteer";
 const DEFAULT_REPO_NAME = "too-many-items";

@@ -51,6 +51,27 @@ try {
   await page.goto(`http://${host}:${port}/`, { waitUntil: "domcontentloaded" });
   await page.waitForFunction(() => document.body.dataset.appReady === "true", { timeout: 20000 });
 
+  const matcherProbe = await page.evaluate(() => {
+    const rows = [
+      { referencesText: "R1 R2", value: "5.1k", footprint: "Resistor_SMD:R_0603_1608Metric_Pad0.98x0.95mm_HandSolder" },
+      { referencesText: "R3 R4", value: "22R", footprint: "Resistor_SMD:R_0603_1608Metric_Pad0.98x0.95mm_HandSolder" },
+      { referencesText: "R5 R6", value: "100k", footprint: "Resistor_SMD:R_0603_1608Metric_Pad0.98x0.95mm_HandSolder" },
+      { referencesText: "R7 R8", value: "10k", footprint: "Resistor_SMD:R_0603_1608Metric_Pad0.98x0.95mm_HandSolder" },
+      { referencesText: "C1 C2", value: "10uF 10V", footprint: "Capacitor_SMD:C_0603_1608Metric_Pad1.08x0.95mm_HandSolder" },
+      { referencesText: "C3 C4", value: "0.1uF 50V", footprint: "Capacitor_SMD:C_0603_1608Metric_Pad1.08x0.95mm_HandSolder" }
+    ];
+    return rows.map((row) => window.findBestPartForBomRow(row)?.name || "");
+  });
+  for (const expected of ["5.1k", "22R", "100k", "10k", "10uF", "100nF"]) {
+    if (!matcherProbe.some((name) => name.includes(expected))) {
+      throw new Error(`BOM matcher did not resolve ${expected}; got ${matcherProbe.join(" | ")}`);
+    }
+  }
+  const badMatch = await page.evaluate(() => window.findBestPartForBomRow({ referencesText: "C", value: "C", footprint: "" })?.name || "");
+  if (badMatch) throw new Error(`BOM matcher should not resolve a one-letter placeholder value, got ${badMatch}.`);
+  const dnpProbe = await page.evaluate(() => window.parseKiCadSchematic('(kicad_sch (symbol (property "Reference" "R1") (property "Value" "10k") (property "Footprint" "Resistor_SMD:R_0603_1608Metric") (dnp no)))')[0]?.dnp);
+  if (dnpProbe !== false) throw new Error("KiCad DNP parser treated explicit dnp=no as DNP.");
+
   for (const view of ["parts", "add", "locations", "projects", "editor", "database", "settings"]) {
     await page.click(`[data-view="${view}"]`);
     await page.waitForFunction((name) => document.querySelector(`[data-view="${name}"]`)?.classList.contains("active"), view);

@@ -57,6 +57,7 @@ function renderProjectManagerView() {
       <h3 class="view-title">project manager</h3>
       <div class="action-row">
         <button type="button" data-action="project-tab" data-tab="source">import source</button>
+        <button type="button" data-action="auto-match-project" data-id="${project.id}">auto-match</button>
         <button type="button" data-action="open-edit-project" data-id="${project.id}">edit project</button>
         <button type="button" data-action="reserve-project" data-id="${project.id}">reserve</button>
         <button type="button" data-action="release-project" data-id="${project.id}">release</button>
@@ -689,7 +690,7 @@ function parseKiCadSchematic(text) {
       footprint: nullableText(props.Footprint || props.footprint),
       mpn: nullableText(props.MPN || props.Mpn || props["Part Number"] || props.PartNumber || props.LCSC),
       manufacturer: nullableText(props.Manufacturer || props.MFR || props.Mfr),
-      dnp: hasChild(node, "dnp") || dnpFromProperties(props),
+      dnp: dnpFromNode(node) || dnpFromProperties(props),
       uuid: childValue(node, "uuid"),
       side: "unknown",
       xMm: null,
@@ -715,7 +716,7 @@ function parseKiCadPcb(text) {
       footprint: nullableText(node[1] || props.Footprint),
       mpn: nullableText(props.MPN || props.Mpn || props["Part Number"] || props.PartNumber || props.LCSC),
       manufacturer: nullableText(props.Manufacturer || props.MFR || props.Mfr),
-      dnp: hasChild(node, "dnp") || dnpFromProperties(props),
+      dnp: dnpFromNode(node) || dnpFromProperties(props),
       uuid: childValue(node, "uuid") || childValue(node, "tstamp"),
       side: /^B\./i.test(layer) ? "bottom" : /^F\./i.test(layer) ? "top" : "unknown",
       xMm: nullableNumber(at[1]),
@@ -912,6 +913,15 @@ function dnpFromProperties(props) {
   if (["1", "yes", "true", "dnp", "dnf"].includes(dnp)) return true;
   const fitted = String(props.Fitted || props.fitted || props.Populate || props.populated || "").trim().toLowerCase();
   return ["0", "no", "false", "dnp", "dnf"].includes(fitted);
+}
+
+function dnpFromNode(node) {
+  const child = findChild(node, "dnp");
+  if (!child) return false;
+  if (child.length <= 1) return true;
+  const value = String(child[1] ?? "").trim().toLowerCase();
+  if (["", "1", "yes", "true", "dnp", "dnf", "exclude"].includes(value)) return true;
+  return !["0", "no", "false", "include", "fitted", "populate"].includes(value);
 }
 
 function simpleTextHash(text) {

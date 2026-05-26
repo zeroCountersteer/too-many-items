@@ -1297,14 +1297,140 @@ function findBestPartForBomRow(row) {
     const alias = (state.inventory.partAliases || []).find((item) => String(item.aliasValue || "").trim().toLowerCase() === mpn);
     if (alias) return state.inventory.parts.find((part) => part.id === alias.partId) || null;
   }
+
+  const ctx = bomMatchContext(row);
+  const scored = state.inventory.parts
+    .map((part) => ({ part, score: scorePartForBom(part, ctx) }))
+    .filter((item) => item.score > 0)
+    .sort((a, b) => b.score - a.score || stockSummary(b.part.id).total - stockSummary(a.part.id).total || a.part.id - b.part.id);
+
+  const best = scored[0];
+  if (best && best.score >= (ctx.kind ? 90 : 45)) return best.part;
+
   const value = String(row.value || "").trim().toLowerCase();
   const footprint = String(row.footprint || "").trim().toLowerCase();
+  if (value.length < 2) return null;
   return state.inventory.parts.find((part) => {
     const name = String(part.name || "").toLowerCase();
     const pkg = String(part.package || "").toLowerCase();
     const fp = String(part.footprint || "").toLowerCase();
     return (!value || name.includes(value)) && (!footprint || fp.includes(footprint) || pkg.includes(footprint));
   }) || null;
+}
+
+function bomMatchContext(row) {
+  const value = textValue(row.value || row.designation || row.name);
+  const footprint = textValue(row.footprint || row.package);
+  const references = textValue(row.referencesText || row.references || row.ref || row.refs);
+  const kind = inferBomKind({ value, footprint, references });
+  return {
+    row,
+    value,
+    valueNorm: normalizeMatchText(value),
+    footprint,
+    footprintNorm: normalizeMatchText(footprint),
+    references,
+    kind,
+    packageToken: extractPackageToken([footprint, value].join(" ")),
+    parsedValue: parseBomElectricalValue(kind, value),
+    voltage: parseBomVoltage(value)
+  };
+}
+
+function inferBomKind({ value, footprint, references }) {
+  const ref = String(references || "").trim().match(/^([A-Za-z]+)/)?.[1]?.toUpperCase() || "";
+  const fp = String(footprint || "").toLowerCase();
+  const text = `${value || ""} ${footprint || ""}`.toLowerCase();
+  if (ref === "R" || fp.includes("resistor") || /^r_/.test(fp) || /\d\s*(r|k|m)(\s|$)/i.test(text)) return "resistor";
+  if (ref === "C" || fp.includes("capacitor") || /^c_/.test(fp) || /\d\s*(p|n|u|\u00b5|\u03bc|m)?f(\s|$)/i.test(text)) return "capacitor";
+  if (ref === "L" || fp.includes("inductor") || /^l_/.test(fp) || /\d\s*(n|u|\u00b5|\u03bc|m)?h(\s|$)/i.test(text)) return "inductor";
+  return null;
+}
+
+function parseBomElectricalValue(kind, value) {
+  const text = String(value || "").replace("\u00b5", "u").replace("\u03bc", "u");
+  if (kind === "resistor") {
+    const token = text.match(/(?:^|[^A-Za-z0-9.])([0-9]+(?:[.,][0-9]+)?\s*(?:[rRkKmM](?:[0-9]+)?|ohms?|\u03a9))(?:[^A-Za-z0-9.]|$)/)?.[1]
+      || text.match(/^([0-9]+(?:[.,][0-9]+)?\s*[rRkKmM]?)(?:\s|$)/)?.[1];
+    return token ? parseResistance(token) : null;
+  }
+  if (kind === "capacitor") {
+    const token = text.match(/(?:^|[^A-Za-z0-9.])([0-9]+(?:[.,][0-9]+)?\s*(?:pF|nF|uF|mF|F|p|n|u|m)(?:[0-9]+)?)(?:[^A-Za-z0-9.]|$)/i)?.[1];
+    return token ? parseCapacitance(token) : null;
+  }
+  if (kind === "inductor") {
+    const token = text.match(/(?:^|[^A-Za-z0-9.])([0-9]+(?:[.,][0-9]+)?\s*(?:nH|uH|mH|H|n|u|m)(?:[0-9]+)?)(?:[^A-Za-z0-9.]|$)/i)?.[1];
+    return token ? parseInductance(token) : null;
+  }
+  return null;
+}
+
+function parseBomVoltage(value) {
+  const match = String(value || "").replace(",", ".").match(/([0-9]+(?:\.[0-9]+)?)\s*v\b/i);
+  return match ? Number(match[1]) : null;
+}
+
+function scorePartForBom(part, ctx) {
+  let score = 0;
+  const partKind = categoryKind(getCategoryName(part.categoryId));
+  if (ctx.kind) {
+    if (partKind !== ctx.kind) return 0;
+    score += 35;
+  }
+
+  const spec = ctx.kind ? getSpec(part.id, ctx.kind) : null;
+  const specValue = spec ? bomComparableSpecValue(ctx.kind, spec) : null;
+  if (ctx.kind && ctx.parsedValue != null) {
+    if (specValue == null || !nearlyEqualElectrical(specValue, ctx.parsedValue)) return 0;
+    score += 90;
+  } else if (ctx.valueNorm && normalizeMatchText(part.name).includes(ctx.valueNorm)) {
+    score += 18;
+  } else if (ctx.kind) {
+    return 0;
+  }
+
+  const partTokens = partPackageTokens(part);
+  if (ctx.packageToken && partTokens.has(ctx.packageToken)) score += 35;
+  else if (ctx.footprintNorm && [part.footprint, part.package].some((value) => normalizeMatchText(value).includes(ctx.footprintNorm) || ctx.footprintNorm.includes(normalizeMatchText(value)))) score += 12;
+
+  if (ctx.voltage != null && spec?.voltageV != null) {
+    const voltage = Number(spec.voltageV);
+    if (Number.isFinite(voltage)) score += voltage >= ctx.voltage ? 8 : -20;
+  }
+
+  if (stockSummary(part.id).total > 0) score += 2;
+  if (ctx.valueNorm && normalizeMatchText(part.name).includes(ctx.valueNorm)) score += 5;
+  return score;
+}
+
+function bomComparableSpecValue(kind, spec) {
+  if (kind === "resistor") return numberOrNull(spec.resistanceOhm);
+  if (kind === "capacitor") return numberOrNull(spec.capacitanceF);
+  if (kind === "inductor") return numberOrNull(spec.inductanceH);
+  return null;
+}
+
+function nearlyEqualElectrical(a, b) {
+  const aa = Number(a);
+  const bb = Number(b);
+  if (!Number.isFinite(aa) || !Number.isFinite(bb)) return false;
+  const tolerance = Math.max(Math.max(Math.abs(aa), Math.abs(bb)) * 1e-6, 1e-15);
+  return Math.abs(aa - bb) <= tolerance;
+}
+
+function normalizeMatchText(value) {
+  return String(value || "").toLowerCase().replace("\u00b5", "u").replace("\u03bc", "u").replace(/[^a-z0-9.]+/g, "");
+}
+
+function extractPackageToken(value) {
+  const text = String(value || "").toLowerCase();
+  const match = text.match(/(?:^|[^0-9])(0201|0402|0603|0805|1206|1210|1812|2010|2512)(?:[^0-9]|$)/)
+    || text.match(/\b(sot[-_ ]?23|sot[-_ ]?223|sod[-_ ]?123|sod[-_ ]?323|sod[-_ ]?523|qfn[-_ ]?\d+|tqfp[-_ ]?\d+|lqfp[-_ ]?\d+)\b/i);
+  return match ? match[1].replace(/[-_ ]/g, "") : "";
+}
+
+function partPackageTokens(part) {
+  return new Set([part.package, part.footprint, part.name].map(extractPackageToken).filter(Boolean));
 }
 
 function autoMatchProject(projectId) {

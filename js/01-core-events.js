@@ -235,6 +235,19 @@ function handleClick(event) {
     case "select-project":
       selectProject(id);
       break;
+    case "auto-match-project": {
+      const matched = autoMatchProject(id);
+      if (!matched) {
+        toast("no unresolved BOM rows matched", "error");
+        break;
+      }
+      logActivity("auto-match-project", "project", id, `${matched} BOM rows matched`);
+      touchInventory();
+      if (!persistDatabase("project BOM auto-matched", { dirty: true })) return;
+      toast(`auto-matched ${matched} BOM row${matched === 1 ? "" : "s"}`);
+      render();
+      break;
+    }
     case "delete-project":
       deleteProject(id);
       break;
