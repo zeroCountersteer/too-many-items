@@ -35,15 +35,15 @@ function renderProjectManagerView() {
     : `<div class="empty-panel compact"><h3>no projects</h3><p>Import KiCad source files or paste a CSV/TSV BOM.</p></div>`;
 
   if (!project) {
-    return `<div class="view-stack">
-      <div class="view-toolbar">
-        <h3 class="view-title">project manager</h3>
+    return `<div class="view-stack project-manager">
+      <div class="panel project-control-bar">
+        <div class="project-control-main">
+          <h3 class="view-title">project manager</h3>
+          <div class="project-list project-list-strip">${list}</div>
+        </div>
         <div class="action-row"><button type="button" class="primary-button" data-action="project-tab" data-tab="source">import KiCad</button></div>
       </div>
-      <div class="projects-layout">
-        <aside class="project-list">${list}</aside>
-        <section class="project-detail">${renderProjectSourceImport(null)}</section>
-      </div>
+      <section class="project-detail">${renderProjectSourceImport(null)}</section>
     </div>`;
   }
 
@@ -54,8 +54,11 @@ function renderProjectManagerView() {
   const tabs = PROJECT_TABS.map(([id, label]) => `<button type="button" class="tab-button ${state.activeProjectTab === id ? "active" : ""}" data-action="project-tab" data-tab="${id}">${escapeHtml(label)}</button>`).join("");
 
   return `<div class="view-stack project-manager">
-    <div class="view-toolbar">
-      <h3 class="view-title">project manager</h3>
+    <div class="panel project-control-bar">
+      <div class="project-control-main">
+        <h3 class="view-title">project manager</h3>
+        <div class="project-list project-list-strip">${list}</div>
+      </div>
       <div class="action-row">
         <button type="button" data-action="project-tab" data-tab="source">import source</button>
         <button type="button" data-action="project-tab" data-tab="match">match review</button>
@@ -67,31 +70,28 @@ function renderProjectManagerView() {
       </div>
     </div>
 
-    <div class="projects-layout">
-      <aside class="project-list">${list}</aside>
-      <section class="project-detail">
-        <div class="panel project-summary-panel">
-          <div class="project-head">
-            <div>
-              <h4>${escapeHtml(project.name)}</h4>
-              <p>${escapeHtml([project.revision, project.status, project.owner].filter(Boolean).join(" / ") || "project")}</p>
-            </div>
-            <button type="button" data-action="delete-project" data-id="${project.id}" class="danger-button">delete project</button>
+    <section class="project-detail">
+      <div class="panel project-summary-panel">
+        <div class="project-head">
+          <div>
+            <h4>${escapeHtml(project.name)}</h4>
+            <p>${escapeHtml([project.revision, project.status, project.owner].filter(Boolean).join(" / ") || "project")}</p>
           </div>
-          ${renderSummaryStrip([
-            [summary.rows, "BOM rows"],
-            [placements, "placements"],
-            [sources, "source files"],
-            [summary.unresolved, "unresolved", summary.unresolved ? "warn" : ""],
-            [summary.shortageRows, "shortages", summary.shortageRows ? "warn" : ""],
-            [formatMoney(cost.total, cost.currency), "BOM total"],
-            [cost.missingPriceRows, "missing price", cost.missingPriceRows ? "warn" : ""]
-          ])}
-          <div class="tab-row">${tabs}</div>
+          <button type="button" data-action="delete-project" data-id="${project.id}" class="danger-button">delete project</button>
         </div>
-        ${renderProjectTabContent(project)}
-      </section>
-    </div>
+        ${renderSummaryStrip([
+          [summary.rows, "BOM rows"],
+          [placements, "placements"],
+          [sources, "source files"],
+          [summary.unresolved, "unresolved", summary.unresolved ? "warn" : ""],
+          [summary.shortageRows, "shortages", summary.shortageRows ? "warn" : ""],
+          [formatMoney(cost.total, cost.currency), "BOM total"],
+          [cost.missingPriceRows, "missing price", cost.missingPriceRows ? "warn" : ""]
+        ])}
+        <div class="tab-row">${tabs}</div>
+      </div>
+      ${renderProjectTabContent(project)}
+    </section>
   </div>`;
 }
 
@@ -398,7 +398,7 @@ function renderPlacementGuideRow(project, placement, session) {
     <td>${part ? `<span class="qty-ok">${stockSummary(part.id).total}</span>${status.shortage ? ` / <span class="qty-low">${status.shortage} short</span>` : ""}` : "-"}</td>
     <td><span class="badge status-chip ${escapeAttr(session ? stepStatus : "pending")}">${escapeHtml(session ? stepStatus : "no session")}</span>${step?.takenQuantity ? ` <span class="subtext">took ${step.takenQuantity}</span>` : ""}</td>
     <td class="action-cell">
-      <div class="row-action-grid">
+      <div class="row-action-grid build-action-grid">
         ${part ? `<button type="button" class="small-button" data-action="take-placement" data-id="${placement.id}" ${disabled}>take</button>` : ""}
         <button type="button" class="small-button" data-action="mark-placement-done" data-id="${placement.id}" ${disabled}>done</button>
         <button type="button" class="small-button" data-action="mark-placement-skipped" data-id="${placement.id}" ${disabled}>skip</button>
