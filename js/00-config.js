@@ -2,11 +2,11 @@
 
 const SQLJS_CDN = "https://cdn.jsdelivr.net/npm/sql.js@1.10.3/dist/";
 const BUNDLED_DB_PATH = "data/inventory.db";
-const APP_VERSION = "v24.1";
+const APP_VERSION = "v25";
 const DEFAULT_THEME_ID = "workbench";
 const DEFAULT_REPO_OWNER = "zeroCountersteer";
 const DEFAULT_REPO_NAME = "too-many-items";
-const VALID_VIEWS = new Set(["parts", "add", "locations", "projects", "editor", "database", "settings"]);
+const VALID_VIEWS = new Set(["parts", "locations", "projects", "database", "settings", "editor"]);
 
 const STORAGE = {
   dbBase64: "tmi.v3.database.base64",
@@ -56,11 +56,12 @@ const LOCATION_TYPES = [
 
 const DEFAULT_PART_COLUMNS = [
   "name",
-  "category",
   "value",
   "package",
   "quantity",
   "location",
+  "price",
+  "status",
   "actions"
 ];
 
@@ -78,6 +79,7 @@ const PART_COLUMN_DEFS = {
   manufacturer: "Manufacturer",
   mpn: "MPN",
   notes: "Notes",
+  status: "Status",
   actions: ""
 };
 

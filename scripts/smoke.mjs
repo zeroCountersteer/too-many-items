@@ -52,6 +52,41 @@ try {
   await page.goto(`http://${host}:${port}/`, { waitUntil: "domcontentloaded" });
   await page.waitForFunction(() => document.body.dataset.appReady === "true", { timeout: 20000 });
 
+  const checkNoHorizontalOverflow = async (label) => {
+    const offenders = await page.evaluate(() => {
+      const selectors = [
+        "html",
+        "body",
+        ".app-shell",
+        ".main-window",
+        ".content-card",
+        ".view-stack",
+        ".panel",
+        ".view-toolbar",
+        ".table-wrap",
+        ".drawer-card",
+        "form"
+      ];
+      const seen = new Set();
+      return selectors.flatMap((selector) => [...document.querySelectorAll(selector)]).filter((element) => {
+        if (seen.has(element)) return false;
+        seen.add(element);
+        if (!element.clientWidth) return false;
+        const overflowX = getComputedStyle(element).overflowX;
+        const diff = element.scrollWidth - element.clientWidth;
+        if (diff <= 2) return false;
+        if (["hidden", "clip"].includes(overflowX) && diff <= 48) return false;
+        return true;
+      }).slice(0, 6).map((element) => ({
+        tag: element.tagName.toLowerCase(),
+        classes: element.className || "",
+        width: Math.round(element.clientWidth),
+        scroll: Math.round(element.scrollWidth)
+      }));
+    });
+    if (offenders.length) throw new Error(`Horizontal overflow at ${label}: ${JSON.stringify(offenders)}`);
+  };
+
   const matcherProbe = await page.evaluate(() => {
     const rows = [
       { referencesText: "R1 R2", value: "5.1k", footprint: "Resistor_SMD:R_0603_1608Metric_Pad0.98x0.95mm_HandSolder" },
@@ -80,11 +115,18 @@ try {
   const dnpProbe = await page.evaluate(() => window.parseKiCadSchematic('(kicad_sch (symbol (property "Reference" "R1") (property "Value" "10k") (property "Footprint" "Resistor_SMD:R_0603_1608Metric") (dnp no)))')[0]?.dnp);
   if (dnpProbe !== false) throw new Error("KiCad DNP parser treated explicit dnp=no as DNP.");
 
-  for (const view of ["parts", "add", "locations", "projects", "editor", "database", "settings"]) {
+  const navViews = await page.$$eval("[data-view]", (buttons) => buttons.map((button) => button.dataset.view));
+  const expectedNavViews = ["parts", "projects", "locations", "database", "settings"];
+  if (JSON.stringify(navViews) !== JSON.stringify(expectedNavViews)) {
+    throw new Error(`Left rail should expose exactly five core views; got ${JSON.stringify(navViews)}`);
+  }
+
+  for (const view of expectedNavViews) {
     await page.click(`[data-view="${view}"]`);
     await page.waitForFunction((name) => document.querySelector(`[data-view="${name}"]`)?.classList.contains("active"), view);
     const title = await page.textContent("#windowTitle");
     if (!title || !title.trim()) throw new Error(`No window title after opening ${view}`);
+    await checkNoHorizontalOverflow(`core view ${view}`);
   }
 
   await page.click('[data-view="locations"]');
@@ -132,7 +174,10 @@ try {
   await page.locator('#partForm [data-action="close-modal"]').first().click();
   await page.waitForSelector("#partForm", { state: "detached", timeout: 10000 });
 
-  await page.click('[data-view="add"]');
+  await page.click('[data-view="parts"]');
+  await page.click('[data-action="open-inventory-imports"]');
+  await page.waitForSelector("#inventoryImportTools[open]", { timeout: 10000 });
+  await checkNoHorizontalOverflow("inventory import tools");
   await page.fill('#kicadBomForm [name="projectName"]', "Smoke Board");
   await page.fill('#kicadBomForm [name="revision"]', "rev smoke");
   await page.fill('#kicadBomForm [name="bomCsv"]', readFileSync(path.join(root, "scripts", "fixtures", "existing-project-bom.csv"), "utf8"));
@@ -230,7 +275,9 @@ try {
   const afterGuideTake = await page.textContent(".build-guide-panel");
   if (beforeGuideTake === afterGuideTake || !afterGuideTake?.includes("took")) throw new Error("Build guide take did not record taken quantity.");
 
-  await page.click('[data-view="editor"]');
+  await page.click('[data-view="parts"]');
+  await page.click('[data-action="set-view"][data-target-view="editor"]');
+  await page.waitForFunction(() => document.querySelector("#windowTitle")?.textContent?.includes("Advanced Editor"), { timeout: 10000 });
   await page.click('[data-action="editor-table"][data-table="stock"]');
   await page.locator('[data-editor-select]').first().check();
   await page.fill("#editorBatchPrice", "0.025");
@@ -253,7 +300,7 @@ try {
     { width: 390, height: 760 }
   ]) {
     await page.setViewportSize(viewport);
-    for (const view of ["parts", "add", "locations", "projects", "editor", "database", "settings"]) {
+    for (const view of expectedNavViews) {
       await page.click(`[data-view="${view}"]`);
       await page.waitForFunction((name) => document.querySelector(`[data-view="${name}"]`)?.classList.contains("active"), view);
       await page.waitForTimeout(120);
@@ -274,7 +321,12 @@ try {
       if (layout.pageScrollsX) throw new Error(`Page scrolls horizontally at ${viewport.width}x${viewport.height} on ${view}; tables should scroll inside panels.`);
       if (!layout.panelVisible) throw new Error(`View panel is not visible at ${viewport.width}x${viewport.height} on ${view}.`);
       if (!layout.shellFits) throw new Error(`App shell escapes the viewport at ${viewport.width}x${viewport.height} on ${view}.`);
+      await checkNoHorizontalOverflow(`${viewport.width}x${viewport.height} ${view}`);
     }
+    await page.click('[data-view="parts"]');
+    await page.click('[data-action="open-inventory-imports"]');
+    await page.waitForSelector("#inventoryImportTools[open]", { timeout: 10000 });
+    await checkNoHorizontalOverflow(`${viewport.width}x${viewport.height} inventory imports`);
   }
 
   const seriousMessages = messages.filter((message) => !/favicon|Failed to load resource/.test(message));

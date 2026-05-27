@@ -108,7 +108,15 @@ function handleClick(event) {
 
   switch (action) {
     case "set-view":
-      setView(actionTarget.dataset.targetView || "parts");
+      if ((actionTarget.dataset.targetView || "parts") === "add") {
+        setView("parts");
+        setTimeout(openInventoryImports, 0);
+      } else {
+        setView(actionTarget.dataset.targetView || "parts");
+      }
+      break;
+    case "open-inventory-imports":
+      openInventoryImports();
       break;
     case "preview-bulk":
       previewBulkImport();
@@ -672,6 +680,16 @@ function setView(view) {
   state.activeView = normalizeView(view);
   localStorage.setItem(STORAGE.activeView, state.activeView);
   render();
+}
+
+function openInventoryImports() {
+  if (state.activeView !== "parts") {
+    setView("parts");
+  }
+  const panel = $("#inventoryImportTools");
+  if (!panel) return;
+  panel.open = true;
+  panel.scrollIntoView({ block: "start", behavior: "smooth" });
 }
 
 function selectedPartIdsArray() {

@@ -14,7 +14,6 @@ function render() {
   const panel = $("#viewPanel");
   const renderers = {
     parts: renderPartsView,
-    add: renderAddImportView,
     locations: renderLocationsView,
     projects: renderProjectsView,
     editor: renderAdvancedEditorView,
@@ -31,12 +30,11 @@ function renderPartsViewOnly() {
 function renderHeader() {
   const owner = state.githubConfig?.owner || DEFAULT_REPO_OWNER;
   const titles = {
-    parts: ["inventory / parts", "Parts"],
-    add: ["inventory / add", "Bulk Add"],
+    parts: ["inventory / workbench", "Inventory"],
     locations: ["inventory / storage", "Locations"],
     projects: ["inventory / projects", "Projects"],
     editor: ["inventory / editor", "Advanced Editor"],
-    database: ["inventory / database", "Stats / DB"],
+    database: ["inventory / reports", "Reports"],
     settings: [owner, "Settings"]
   };
   const [path, title] = titles[state.activeView] || titles.parts;
@@ -127,9 +125,10 @@ function renderSettingsView() {
         </section>
 
         <section class="panel form-section danger-zone">
-          <h4>local browser copy</h4>
+          <h4>maintenance</h4>
           <p class="small-note">Edits survive refreshes in local browser storage until you clear them.</p>
           <div class="action-row">
+            <button type="button" data-action="set-view" data-target-view="editor">advanced editor</button>
             <button type="button" data-action="restore-repair-backup">restore repair backup</button>
             <button type="button" class="danger-button" data-action="clear-cache">clear local copy</button>
           </div>
@@ -214,7 +213,8 @@ function renderPartsView() {
           </select>
         </div>
         <div class="action-row">
-          <button type="button" data-action="set-view" data-target-view="add">bulk add</button>
+          <button type="button" data-action="open-inventory-imports">bulk/import</button>
+          <button type="button" data-action="set-view" data-target-view="editor">advanced editor</button>
           <button type="button" class="primary-button" data-action="open-add-part">add part</button>
           <button type="button" data-action="export-csv">CSV</button>
           <button type="button" data-action="export-db">DB</button>
@@ -227,6 +227,8 @@ function renderPartsView() {
         [metrics.quantity, "items"],
         [metrics.lowStock, "low stock", metrics.lowStock ? "warn" : ""]
       ])}
+
+      ${renderInventoryImportPanel()}
 
       ${renderBulkActionToolbar(filtered)}
 
@@ -305,6 +307,11 @@ function renderPartsTable(parts, totalCount) {
     if (col === "price") {
       const price = partPriceInfo(part.id);
       return `<td>${price.unitPrice == null ? `<span class="muted">missing</span>` : escapeHtml(formatMoney(price.unitPrice, price.currency))}${price.mixedCurrency ? ` <span class="danger-text">mixed</span>` : ""}</td>`;
+    }
+    if (col === "status") {
+      const label = stock.total === 0 ? "zero" : low ? "low" : "ok";
+      const tone = stock.total === 0 || low ? "skipped" : "done";
+      return `<td><span class="badge status-chip ${tone}">${label}</span></td>`;
     }
     if (col === "manufacturer") return `<td>${escapeHtml(part.manufacturer || "")}</td>`;
     if (col === "mpn") return `<td>${escapeHtml(part.mpn || "")}</td>`;
@@ -471,23 +478,22 @@ function renderLocationNode(location, depth = 0) {
   </article>`;
 }
 
-function renderAddImportView() {
+function renderInventoryImportPanel(open = false) {
   const locations = [`<option value="">no default location</option>`].concat(
     state.inventory.locations.map((location) => `<option value="${location.id}">${escapeHtml(locationPath(location.id))}</option>`)
   ).join("");
   const projectOptions = (state.inventory.projects || []).map((project) => `<option value="${project.id}">${escapeHtml(project.name)}${project.revision ? ` / ${escapeHtml(project.revision)}` : ""}</option>`).join("");
 
-  return `
-    <div class="view-stack">
-      <div class="view-toolbar">
-        <h3 class="view-title">bulk entry</h3>
-        <div class="action-row"><button type="button" class="primary-button" data-action="open-add-part">manual part</button></div>
-      </div>
+  return `<details class="panel advanced-panel inventory-import-panel" id="inventoryImportTools" ${open ? "open" : ""}>
+    <summary>Add and import workflows</summary>
+    <div class="import-panel-head">
       ${renderSummaryStrip([
-        ["row editor", "bulk add"],
-        ["E3-E96", "series"],
+        ["single", "manual part"],
+        ["rows", "bulk add"],
         ["CSV / TSV", "project BOM"]
       ])}
+      <div class="action-row"><button type="button" class="primary-button" data-action="open-add-part">manual part</button></div>
+    </div>
       <div class="add-import-grid">
         <section class="panel form-section add-card">
           <div class="panel-head"><h4>spreadsheet bulk add</h4></div>
@@ -553,8 +559,11 @@ function renderAddImportView() {
           <div id="bomPreview" class="bulk-preview"></div>
         </section>
       </div>
-    </div>
-  `;
+    </details>`;
+}
+
+function renderAddImportView() {
+  return `<div class="view-stack">${renderInventoryImportPanel(true)}</div>`;
 }
 
 function renderBulkLine(index, row = {}) {

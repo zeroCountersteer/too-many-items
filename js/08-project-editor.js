@@ -335,7 +335,7 @@ function renderProjectSourceImport(project) {
     <details class="advanced-panel nested-card">
       <summary>CSV/TSV BOM fallback</summary>
       <p class="small-note">The Add view still accepts generic BOM tables when source files are not available.</p>
-      <button type="button" data-action="set-view" data-target-view="add">open BOM importer</button>
+      <button type="button" data-action="open-inventory-imports">open BOM importer</button>
     </details>
   </section>`;
 }
