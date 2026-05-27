@@ -13,34 +13,47 @@ function openPartModal(partId = null, prefill = null) {
   const categoryOptions = state.inventory.categories.map((category) => `<option value="${category.id}" ${category.id === categoryId ? "selected" : ""}>${escapeHtml(category.name)}</option>`).join("");
 
   openDrawer(`
-    <form id="partForm" class="drawer-card" novalidate>
+    <form id="partForm" class="drawer-card part-drawer" novalidate>
       <div class="drawer-head">
         <div><p class="path-line">inventory / part editor</p><h3>${title}</h3></div>
         <button type="button" class="icon-button" data-action="close-modal">x</button>
       </div>
       <input type="hidden" name="id" value="${part ? part.id : ""}" />
-      <div class="form-grid">
-        <div class="field span-2"><label>name</label><input name="name" required value="${escapeAttr(draft?.name || "")}" placeholder="100nF 50V X7R 0603" /></div>
-        <div class="field"><label>category</label><select name="categoryId" id="partCategorySelect">${categoryOptions}</select></div>
-        <div class="field"><label>package</label><input name="package" value="${escapeAttr(draft?.package || "")}" placeholder="0603, QFN-48, SOT-23" /></div>
-        <div class="field"><label>manufacturer</label><input name="manufacturer" value="${escapeAttr(draft?.manufacturer || "")}" placeholder="Texas Instruments" /></div>
-        <div class="field"><label>mpn</label><input name="mpn" value="${escapeAttr(draft?.mpn || "")}" placeholder="TPS25751D" /></div>
-        <div class="field"><label>footprint</label><input name="footprint" value="${escapeAttr(draft?.footprint || "")}" placeholder="C_0603_1608Metric" /></div>
-        <div class="field"><label>datasheet url</label><input name="datasheetUrl" value="${escapeAttr(draft?.datasheetUrl || "")}" placeholder="https://..." /></div>
-        <div class="field span-2"><label>description</label><input name="description" value="${escapeAttr(draft?.description || "")}" /></div>
-        <div class="field span-2"><label>notes</label><textarea name="notes">${escapeHtml(draft?.notes || "")}</textarea></div>
-      </div>
+      <section class="editor-section identity-section">
+        <div class="section-head"><h4>identity</h4><p>Name, category, package, and sourcing identifiers.</p></div>
+        <div class="form-grid">
+          <div class="field span-2"><label>name</label><input name="name" required value="${escapeAttr(draft?.name || "")}" placeholder="100nF 50V X7R 0603" /></div>
+          <div class="field"><label>category</label><select name="categoryId" id="partCategorySelect">${categoryOptions}</select></div>
+          <div class="field"><label>package</label><input name="package" value="${escapeAttr(draft?.package || "")}" placeholder="0603, QFN-48, SOT-23" /></div>
+          <div class="field"><label>manufacturer</label><input name="manufacturer" value="${escapeAttr(draft?.manufacturer || "")}" placeholder="Texas Instruments" /></div>
+          <div class="field"><label>mpn</label><input name="mpn" value="${escapeAttr(draft?.mpn || "")}" placeholder="TPS25751D" /></div>
+          <div class="field"><label>footprint</label><input name="footprint" value="${escapeAttr(draft?.footprint || "")}" placeholder="C_0603_1608Metric" /></div>
+          <div class="field"><label>datasheet url</label><input name="datasheetUrl" value="${escapeAttr(draft?.datasheetUrl || "")}" placeholder="https://..." /></div>
+          <div class="field span-2"><label>description</label><input name="description" value="${escapeAttr(draft?.description || "")}" /></div>
+          <div class="field span-2"><label>notes</label><textarea name="notes">${escapeHtml(draft?.notes || "")}</textarea></div>
+        </div>
+      </section>
 
-      <p class="section-title">category specific specs</p>
-      <div class="spec-box" id="specFields">${renderSpecFields(draft, categoryName)}</div>
+      <section class="editor-section">
+        <div class="section-head"><h4>category specs</h4><p>Numeric values used for filtering and BOM matching.</p></div>
+        <div class="spec-box" id="specFields">${renderSpecFields(draft, categoryName)}</div>
+      </section>
 
-      <p class="section-title">stock</p>
-      <div class="stock-editor" id="stockRows">${rowHtml}</div>
-      <button type="button" class="ghost-button" data-action="add-stock-row">+ stock row</button>
+      <section class="editor-section stock-section">
+        <div class="section-head action-head">
+          <div><h4>stock lots</h4><p>Location, quantity, minimum, source, and pricing per lot.</p></div>
+          <button type="button" class="ghost-button" data-action="add-stock-row">+ stock row</button>
+        </div>
+        <div class="stock-editor" id="stockRows">${rowHtml}</div>
+      </section>
 
-      <p class="section-title">aliases</p>
-      <div class="alias-editor" id="aliasRows">${aliasHtml}</div>
-      <button type="button" class="ghost-button" data-action="add-alias-row">+ alias</button>
+      <section class="editor-section alias-section">
+        <div class="section-head action-head">
+          <div><h4>aliases</h4><p>Vendor names, alternate MPNs, and search helpers.</p></div>
+          <button type="button" class="ghost-button" data-action="add-alias-row">+ alias</button>
+        </div>
+        <div class="alias-editor" id="aliasRows">${aliasHtml}</div>
+      </section>
 
       <div class="form-actions">
         ${part ? `<button type="button" class="danger-button" data-action="delete-part" data-id="${part.id}">delete</button>` : ""}
