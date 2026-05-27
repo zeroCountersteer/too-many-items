@@ -180,10 +180,24 @@ try {
   if (!sourceReviewText?.includes("unmatched")) throw new Error("KiCad source import should route to match review before build guide.");
   await page.click('[data-action="accept-all-exact"]');
   await page.waitForTimeout(250);
+  await page.click('[data-action="project-tab"][data-tab="bom"]');
+  await page.locator(".bom-editor-panel", { hasText: "BOM editor" }).waitFor({ timeout: 10000 });
+  await page.locator('.bom-table [data-action="match-bom-row"]').first().click();
+  await page.locator("#bomMatcherForm", { hasText: "manual match" }).waitFor({ timeout: 10000 });
+  await page.fill("[data-bom-matcher-search]", "100n");
+  await page.waitForTimeout(250);
+  if (!await page.locator("#bomMatcherResults", { hasText: "100n" }).count()) throw new Error("Manual BOM matcher did not search inventory candidates.");
+  await page.locator('#bomMatcherResults [data-action="apply-bom-manual-match"]').first().click();
+  await page.waitForSelector("#bomMatcherForm", { state: "detached", timeout: 10000 });
   await page.click('[data-action="project-tab"][data-tab="guide"]');
   await page.waitForFunction(() => document.querySelector(".build-guide-panel"), { timeout: 10000 });
   const guideText = await page.textContent(".build-guide-panel");
   if (!guideText?.includes("R1") || !guideText?.includes("iBOM build guide")) throw new Error("KiCad source import did not route to the build guide.");
+  const pcbRenderProbe = await page.evaluate(() => ({
+    footprints: document.querySelectorAll(".placement-footprint .footprint-body").length,
+    boardEdges: document.querySelectorAll(".board-outline, .board-edge-line").length
+  }));
+  if (pcbRenderProbe.footprints < 2 || pcbRenderProbe.boardEdges < 1) throw new Error(`PCB render did not draw board and footprint bodies: ${JSON.stringify(pcbRenderProbe)}`);
   if (!await page.locator('.build-placement-table [data-action="mark-placement-done"]').first().isDisabled()) throw new Error("Build guide actions should be disabled until a build session exists.");
   {
     const answers = ["Smoke build", "1"];

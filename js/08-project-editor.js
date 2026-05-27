@@ -6,7 +6,7 @@ const PROJECT_TABS = [
   ["source", "Source Import"],
   ["match", "Match Review"],
   ["guide", "Build Guide"],
-  ["bom", "BOM"],
+  ["bom", "BOM Editor"],
   ["history", "History"]
 ];
 
@@ -106,9 +106,12 @@ function renderProjectTabContent(project) {
       const part = row.partId ? state.inventory.parts.find((item) => item.id === row.partId) : null;
       return [row.value, row.footprint, row.mpn, row.referencesText, part?.name].filter(Boolean).join(" ").toLowerCase().includes(q);
     });
-    return `<section class="panel">
+    return `<section class="panel bom-editor-panel">
       <div class="panel-head">
-        <h4>BOM rows</h4>
+        <div>
+          <h4>BOM editor</h4>
+          <p>Edit rows, take project parts, or open the manual matcher for exact inventory assignment.</p>
+        </div>
         <div class="action-row">
           <input type="search" data-project-search value="${escapeAttr(state.projectQuery || "")}" placeholder="filter BOM rows" />
           <button type="button" data-action="project-tab" data-tab="source">import/update</button>
@@ -199,6 +202,7 @@ function renderMatchReviewTable(project, rows, selected) {
       <td class="action-cell">
         <div class="row-action-grid">
           ${candidate ? `<button type="button" class="small-button" data-action="accept-bom-row-match" data-id="${row.id}">accept</button>` : ""}
+          <button type="button" class="small-button" data-action="match-bom-row" data-id="${row.id}">match</button>
           <button type="button" class="small-button" data-action="open-edit-bom-row" data-id="${row.id}">edit</button>
         </div>
       </td>
@@ -414,30 +418,76 @@ function renderBoardSvg(project, placements, session) {
   const height = Math.max(10, bounds.maxY - bounds.minY);
   const pad = Math.max(width, height) * 0.08;
   const viewBox = `${bounds.minX - pad} ${bounds.minY - pad} ${width + pad * 2} ${height + pad * 2}`;
-  const markers = placements.map((placement) => {
+  const boardGeometry = projectBoardGeometry(project.id);
+  const boardShapes = boardGeometry.length
+    ? boardGeometry.map(renderBoardShape).join("")
+    : `<rect class="board-outline" x="${bounds.minX}" y="${bounds.minY}" width="${width}" height="${height}" rx="1.5"></rect>`;
+  const footprints = placements.map((placement) => {
     const x = placement.xMm ?? bounds.minX + width / 2;
     const y = placement.yMm ?? bounds.minY + height / 2;
     const row = placement.bomRowId ? state.inventory.projectBom.find((item) => item.id === placement.bomRowId) : null;
     const step = session ? buildStepForPlacement(session.id, placement.id) : null;
+    const body = placementBody(placement);
+    const fitted = placement.dnp ? "dnp" : "fitted";
     const cls = [
-      "placement-marker",
+      "placement-footprint",
       placement.side || "unknown",
       row?.partId ? "matched" : "unmatched",
+      fitted,
       step?.status === "done" ? "done" : "",
       step?.status === "skipped" ? "skipped" : ""
     ].filter(Boolean).join(" ");
     return `<g class="${cls}" data-action="mark-placement-done" data-id="${placement.id}" transform="translate(${x} ${y}) rotate(${placement.rotation || 0})">
-      <circle r="1.9"></circle>
-      <text x="2.4" y="0.8">${escapeHtml(placement.reference)}</text>
+      <rect class="footprint-body" x="${-body.width / 2}" y="${-body.height / 2}" width="${body.width}" height="${body.height}" rx="${Math.min(0.35, body.height / 3)}"></rect>
+      <line class="footprint-pin1" x1="${-body.width / 2}" y1="${-body.height / 2}" x2="${Math.min(0, -body.width / 2 + body.width * 0.35)}" y2="${-body.height / 2}"></line>
+      <circle class="footprint-center" r="${Math.min(0.55, Math.max(0.2, Math.min(body.width, body.height) * 0.18))}"></circle>
+      <text x="${body.width / 2 + 0.7}" y="0.75">${escapeHtml(placement.reference)}</text>
     </g>`;
   }).join("");
+  const gridSize = Math.max(5, Math.round(Math.max(width, height) / 10));
   const ratio = `${trimNumber(width + pad * 2)} / ${trimNumber(height + pad * 2)}`;
-  return `<div class="board-panel" style="--board-ratio:${escapeAttr(ratio)}">
+  return `<div class="board-panel pcb-render-panel" style="--board-ratio:${escapeAttr(ratio)}">
+    <div class="pcb-render-legend">
+      <span><i class="legend-swatch matched"></i>matched</span>
+      <span><i class="legend-swatch unmatched"></i>unresolved</span>
+      <span><i class="legend-swatch done"></i>done</span>
+      <span><i class="legend-swatch skipped"></i>skipped</span>
+    </div>
     <svg class="board-svg" viewBox="${escapeAttr(viewBox)}" role="img" aria-label="PCB placement map">
-      <rect class="board-outline" x="${bounds.minX}" y="${bounds.minY}" width="${width}" height="${height}" rx="1.5"></rect>
-      ${markers}
+      <defs>
+        <pattern id="pcbGrid-${project.id}" width="${gridSize}" height="${gridSize}" patternUnits="userSpaceOnUse">
+          <path d="M ${gridSize} 0 L 0 0 0 ${gridSize}" class="pcb-grid-line"></path>
+        </pattern>
+      </defs>
+      <rect class="pcb-grid-fill" x="${bounds.minX - pad}" y="${bounds.minY - pad}" width="${width + pad * 2}" height="${height + pad * 2}" fill="url(#pcbGrid-${project.id})"></rect>
+      <g class="board-shape">${boardShapes}</g>
+      <g class="placement-layer">${footprints}</g>
     </svg>
   </div>`;
+}
+
+function projectBoardGeometry(projectId) {
+  for (const placement of projectPlacements(projectId)) {
+    const meta = parseJsonSafe(placement.boundingJson);
+    if (Array.isArray(meta?.boardGeometry) && meta.boardGeometry.length) return meta.boardGeometry;
+  }
+  return [];
+}
+
+function placementBody(placement) {
+  const meta = parseJsonSafe(placement.boundingJson);
+  const body = meta?.body || footprintBodyFallback(placement.footprint);
+  return {
+    width: Math.max(0.5, Math.min(30, Number(body.width) || 2.4)),
+    height: Math.max(0.5, Math.min(30, Number(body.height) || 1.4))
+  };
+}
+
+function renderBoardShape(shape) {
+  if (shape.type === "rect") return `<rect class="board-outline" x="${shape.x}" y="${shape.y}" width="${shape.width}" height="${shape.height}" rx="1.5"></rect>`;
+  if (shape.type === "line") return `<line class="board-edge-line" x1="${shape.x1}" y1="${shape.y1}" x2="${shape.x2}" y2="${shape.y2}"></line>`;
+  if (shape.type === "circle") return `<circle class="board-edge-line" cx="${shape.cx}" cy="${shape.cy}" r="${shape.r}"></circle>`;
+  return "";
 }
 
 function shortFootprint(value) {
@@ -754,7 +804,11 @@ function replaceProjectSourceData(project, parsed, now) {
       mpn: component.mpn || null,
       manufacturer: component.manufacturer || null,
       dnp: component.dnp ? 1 : 0,
-      boundingJson: JSON.stringify({ boardBounds: parsed.boardBounds || null }),
+      boundingJson: JSON.stringify({
+        boardBounds: parsed.boardBounds || null,
+        boardGeometry: parsed.boardGeometry || [],
+        body: component.body || footprintBodyFallback(component.footprint)
+      }),
       notes: component.notes || null
     });
   });
@@ -786,6 +840,7 @@ async function parseKiCadProjectFiles(fileList) {
   const placementsByRef = new Map();
   const warnings = [];
   let boardBounds = null;
+  let boardGeometry = [];
   let projectName = "";
   let primarySource = "";
 
@@ -801,6 +856,7 @@ async function parseKiCadProjectFiles(fileList) {
         const parsed = parseKiCadPcb(text);
         parsed.placements.forEach((placement) => placementsByRef.set(placement.reference, placement));
         boardBounds = parsed.boardBounds || boardBounds;
+        boardGeometry = parsed.boardGeometry?.length ? parsed.boardGeometry : boardGeometry;
         if (!projectName) projectName = file.name.replace(/\.kicad_pcb$/i, "");
       } else if (fileType === "schematic") {
         schematicComponents.push(...parseKiCadSchematic(text));
@@ -814,7 +870,7 @@ async function parseKiCadProjectFiles(fileList) {
   const components = mergeKiCadComponents(schematicComponents, placementsByRef);
   if (!files.some((file) => file.name.endsWith(".kicad_pcb"))) warnings.push("No .kicad_pcb file selected; board placement markers may be incomplete.");
   if (!files.some((file) => file.name.endsWith(".kicad_sch"))) warnings.push("No .kicad_sch file selected; BOM metadata is inferred from PCB properties.");
-  return { sources, components, warnings, boardBounds, projectName, primarySource };
+  return { sources, components, warnings, boardBounds, boardGeometry, projectName, primarySource };
 }
 
 function parseKiCadSchematic(text) {
@@ -849,10 +905,11 @@ function parseKiCadPcb(text) {
     const layer = childValue(node, "layer") || "";
     const reference = textValue(props.Reference || texts.reference || texts.ref);
     if (!reference || reference.startsWith("#")) return null;
+    const footprint = nullableText(node[1] || props.Footprint);
     return {
       reference,
       value: nullableText(props.Value || texts.value),
-      footprint: nullableText(node[1] || props.Footprint),
+      footprint,
       mpn: nullableText(props.MPN || props.Mpn || props["Part Number"] || props.PartNumber || props.LCSC),
       manufacturer: nullableText(props.Manufacturer || props.MFR || props.Mfr),
       dnp: dnpFromNode(node) || dnpFromProperties(props),
@@ -861,10 +918,11 @@ function parseKiCadPcb(text) {
       xMm: nullableNumber(at[1]),
       yMm: nullableNumber(at[2]),
       rotation: nullableNumber(at[3]),
+      body: footprintBodySize(node, footprint),
       notes: null
     };
   }).filter(Boolean);
-  return { placements, boardBounds: extractBoardBounds(tree, placements) };
+  return { placements, boardBounds: extractBoardBounds(tree, placements), boardGeometry: extractBoardGeometry(tree) };
 }
 
 function mergeKiCadComponents(schematicComponents, placementsByRef) {
@@ -885,6 +943,7 @@ function mergeKiCadComponents(schematicComponents, placementsByRef) {
       xMm: pcb.xMm ?? null,
       yMm: pcb.yMm ?? null,
       rotation: pcb.rotation ?? null,
+      body: pcb.body || footprintBodyFallback(sch.footprint || pcb.footprint),
       notes: null
     };
   });
@@ -1045,6 +1104,80 @@ function extractBoardBounds(tree, placements) {
   const xs = points.map(([x]) => x);
   const ys = points.map(([, y]) => y);
   return { minX: Math.min(...xs), minY: Math.min(...ys), maxX: Math.max(...xs), maxY: Math.max(...ys) };
+}
+
+function extractBoardGeometry(tree) {
+  const shapes = [];
+  const point = (node) => {
+    const x = nullableNumber(node?.[1]);
+    const y = nullableNumber(node?.[2]);
+    return x !== null && y !== null ? { x, y } : null;
+  };
+  const isEdge = (node) => childValue(node, "layer") === "Edge.Cuts";
+  findSexpr(tree, "gr_rect").forEach((node) => {
+    if (!isEdge(node)) return;
+    const start = point(findChild(node, "start"));
+    const end = point(findChild(node, "end"));
+    if (start && end) shapes.push({ type: "rect", x: Math.min(start.x, end.x), y: Math.min(start.y, end.y), width: Math.abs(end.x - start.x), height: Math.abs(end.y - start.y) });
+  });
+  findSexpr(tree, "gr_line").forEach((node) => {
+    if (!isEdge(node)) return;
+    const start = point(findChild(node, "start"));
+    const end = point(findChild(node, "end"));
+    if (start && end) shapes.push({ type: "line", x1: start.x, y1: start.y, x2: end.x, y2: end.y });
+  });
+  findSexpr(tree, "gr_circle").forEach((node) => {
+    if (!isEdge(node)) return;
+    const center = point(findChild(node, "center"));
+    const end = point(findChild(node, "end"));
+    if (center && end) shapes.push({ type: "circle", cx: center.x, cy: center.y, r: Math.hypot(end.x - center.x, end.y - center.y) });
+  });
+  return shapes;
+}
+
+function footprintBodySize(node, footprint) {
+  const points = [];
+  const addPoint = (pointNode) => {
+    const x = nullableNumber(pointNode?.[1]);
+    const y = nullableNumber(pointNode?.[2]);
+    if (x !== null && y !== null) points.push([x, y]);
+  };
+  findSexpr(node, "fp_rect").forEach((shape) => {
+    addPoint(findChild(shape, "start"));
+    addPoint(findChild(shape, "end"));
+  });
+  findSexpr(node, "fp_line").forEach((shape) => {
+    addPoint(findChild(shape, "start"));
+    addPoint(findChild(shape, "end"));
+  });
+  if (points.length >= 2) {
+    const xs = points.map(([x]) => x);
+    const ys = points.map(([, y]) => y);
+    const width = Math.max(0.5, Math.min(30, Math.max(...xs) - Math.min(...xs)));
+    const height = Math.max(0.5, Math.min(30, Math.max(...ys) - Math.min(...ys)));
+    return { width, height };
+  }
+  return footprintBodyFallback(footprint);
+}
+
+function footprintBodyFallback(footprint) {
+  const text = String(footprint || "").toLowerCase();
+  const table = [
+    [/0402|1005/, [1.05, 0.6]],
+    [/0603|1608/, [1.7, 0.95]],
+    [/0805|2012/, [2.2, 1.35]],
+    [/1206|3216/, [3.4, 1.8]],
+    [/sod-?323/, [2.6, 1.45]],
+    [/sod-?123/, [3.8, 1.8]],
+    [/sot-?23/, [3.0, 1.7]],
+    [/qfn|ufqfp|lqfp/, [5.2, 5.2]],
+    [/cherry|mx|keyswitch/, [14.0, 14.0]],
+    [/mountinghole|mounting_hole/, [4.2, 4.2]],
+    [/led.*5050|ws2812/, [5.2, 5.2]]
+  ];
+  const match = table.find(([pattern]) => pattern.test(text));
+  const [width, height] = match ? match[1] : [2.4, 1.4];
+  return { width, height };
 }
 
 function dnpFromProperties(props) {

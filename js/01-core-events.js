@@ -23,6 +23,7 @@ const state = {
   projectQuery: "",
   projectMatchFilter: "all",
   selectedBomRowIds: new Set(),
+  bomMatcherQuery: "",
   projectRepairAnalysis: null,
   editorTable: "parts",
   editorSelection: new Set(),
@@ -307,7 +308,13 @@ function handleClick(event) {
       clearServiceWorkerCaches();
       break;
     case "match-bom-row":
+      openBomMatcherDrawer(id);
+      break;
+    case "auto-match-bom-row":
       matchBomRow(id);
+      break;
+    case "apply-bom-manual-match":
+      applyManualBomMatch(id, Number(actionTarget.dataset.partId || 0));
       break;
     case "unlink-bom-row":
       unlinkBomRow(id);
@@ -481,6 +488,12 @@ function handleInput(event) {
     return;
   }
 
+  if (target.matches("[data-bom-matcher-search]")) {
+    state.bomMatcherQuery = target.value;
+    refreshBomMatcherResults(Number(target.dataset.rowId || 0));
+    return;
+  }
+
   if (target.matches("[data-render-limit]")) {
     const value = Math.max(50, Number(target.value) || PERFORMANCE_DEFAULTS.renderLimit);
     state.renderLimit = value;
@@ -636,6 +649,7 @@ function handleSubmit(event) {
     bulkImportForm: () => importBulkParts(),
     partForm: () => savePartFromForm(form),
     bomRowForm: () => saveBomRowFromForm(form),
+    bomMatcherForm: () => null,
     projectForm: () => saveProjectFromForm(form),
     locationForm: () => saveLocationFromForm(form),
     settingsForm: () => saveSettings(form)

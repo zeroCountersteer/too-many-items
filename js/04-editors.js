@@ -465,6 +465,13 @@ function openBomRowModal(rowId) {
         <label class="switch-row inline-switch"><span>fitted</span><input name="fitted" type="checkbox" ${row.fitted === 0 ? "" : "checked"} /></label>
         <div class="field span-2"><label>notes</label><textarea name="notes">${escapeHtml(row.notes || "")}</textarea></div>
       </div>
+      <section class="matcher-mini">
+        <div class="panel-head">
+          <div><h4>match candidates</h4><p>${escapeHtml([row.value, shortFootprint(row.footprint || "")].filter(Boolean).join(" / ") || "manual match")}</p></div>
+          <button type="button" data-action="match-bom-row" data-id="${row.id}">open matcher</button>
+        </div>
+        ${renderBomMatcherCandidateList(row, "", { limit: 4, compact: true })}
+      </section>
       <div class="form-actions">
         ${row.partId ? `<button type="button" data-action="take-bom-row" data-id="${row.id}">take qty</button>` : ""}
         <button type="button" class="ghost-button" data-action="close-modal">cancel</button>
@@ -472,6 +479,133 @@ function openBomRowModal(rowId) {
       </div>
     </form>
   `);
+}
+
+function openBomMatcherDrawer(rowId) {
+  const row = state.inventory.projectBom.find((item) => item.id === Number(rowId));
+  if (!row) return;
+  state.bomMatcherQuery = "";
+  const current = row.partId ? state.inventory.parts.find((part) => part.id === row.partId) : null;
+  openDrawer(`
+    <form id="bomMatcherForm" class="drawer-card matcher-drawer" novalidate onsubmit="return false;">
+      <div class="drawer-head">
+        <div>
+          <p class="path-line">project / BOM matcher</p>
+          <h3>manual match</h3>
+        </div>
+        <button type="button" class="icon-button" data-action="close-modal">x</button>
+      </div>
+      <div class="bom-match-target">
+        <div><span class="muted">refs</span><strong>${escapeHtml(row.referencesText || "-")}</strong></div>
+        <div><span class="muted">value</span><strong>${escapeHtml(row.value || "-")}</strong></div>
+        <div><span class="muted">footprint</span><strong title="${escapeAttr(row.footprint || "")}">${escapeHtml(shortFootprint(row.footprint || "")) || "-"}</strong></div>
+        <div><span class="muted">current</span>${current ? `<button type="button" class="link-button" data-action="open-edit-part" data-id="${current.id}">${escapeHtml(current.name)}</button>` : `<strong class="danger-text">unresolved</strong>`}</div>
+      </div>
+      <div class="field">
+        <label>search inventory</label>
+        <input data-bom-matcher-search data-row-id="${row.id}" placeholder="part name, value, footprint, MPN, location" autocomplete="off" />
+      </div>
+      <div class="action-row">
+        <button type="button" data-action="auto-match-bom-row" data-id="${row.id}">apply best automatic match</button>
+        ${row.partId ? `<button type="button" class="danger-button" data-action="unlink-bom-row" data-id="${row.id}">unlink current match</button>` : ""}
+      </div>
+      <div id="bomMatcherResults">
+        ${renderBomMatcherCandidateList(row, "", { limit: 12 })}
+      </div>
+    </form>
+  `);
+}
+
+function refreshBomMatcherResults(rowId) {
+  const row = state.inventory.projectBom.find((item) => item.id === Number(rowId));
+  const target = $("#bomMatcherResults");
+  if (!row || !target) return;
+  target.innerHTML = renderBomMatcherCandidateList(row, state.bomMatcherQuery || "", { limit: 18 });
+}
+
+function renderBomMatcherCandidateList(row, query = "", options = {}) {
+  const entries = bomMatcherEntries(row, query, options.limit || 12);
+  if (!entries.length) {
+    return `<div class="empty-panel compact"><h3>no matching inventory parts</h3><p>Try a value, footprint, MPN, category, or location.</p></div>`;
+  }
+  return `<div class="matcher-candidate-list ${options.compact ? "compact" : ""}">
+    ${entries.map((entry) => renderBomMatcherCandidate(row, entry, options)).join("")}
+  </div>`;
+}
+
+function bomMatcherEntries(row, query = "", limit = 12) {
+  const normalizedQuery = textValue(query).toLowerCase();
+  const ranked = getBomMatchCandidates(row, { limit: Math.max(limit, 12) });
+  const byPart = new Map(ranked.map((candidate) => [candidate.partId, { part: state.inventory.parts.find((part) => part.id === candidate.partId), candidate, source: "ranked" }]));
+  if (normalizedQuery) {
+    state.inventory.parts.forEach((part) => {
+      const stock = stockSummary(part.id);
+      const haystack = [
+        part.name,
+        part.description,
+        part.package,
+        part.footprint,
+        part.mpn,
+        part.manufacturer,
+        getCategoryName(part.categoryId),
+        specSummary(part),
+        stock.locations
+      ].filter(Boolean).join(" ").toLowerCase();
+      if (haystack.includes(normalizedQuery) && !byPart.has(part.id)) {
+        byPart.set(part.id, { part, candidate: null, source: "search" });
+      }
+    });
+  }
+  return [...byPart.values()]
+    .filter((entry) => entry.part)
+    .sort((a, b) => (b.candidate?.score || 0) - (a.candidate?.score || 0) || String(a.part.name || "").localeCompare(String(b.part.name || ""), undefined, { numeric: true, sensitivity: "base" }))
+    .slice(0, limit);
+}
+
+function renderBomMatcherCandidate(row, entry, options = {}) {
+  const part = entry.part;
+  const candidate = entry.candidate;
+  const stock = stockSummary(part.id);
+  const price = partPriceInfo(part.id);
+  const reasons = candidate?.reasons || [];
+  const warnings = [...(candidate?.rowWarnings || []), ...(candidate?.warnings || [])];
+  const current = row.partId === part.id;
+  return `<article class="matcher-candidate ${current ? "current" : ""}">
+    <div class="candidate-main">
+      <strong>${escapeHtml(part.name)}</strong>
+      <span class="cell-truncate" title="${escapeAttr([getCategoryName(part.categoryId), specSummary(part), part.package, part.footprint].filter(Boolean).join(" / "))}">
+        ${escapeHtml([getCategoryName(part.categoryId), specSummary(part), part.package || shortFootprint(part.footprint || "")].filter(Boolean).join(" / "))}
+      </span>
+      ${reasons.length && !options.compact ? `<span class="candidate-reasons">${escapeHtml(reasons.join(" / "))}</span>` : ""}
+      ${warnings.length && !options.compact ? `<span class="danger-text cell-truncate" title="${escapeAttr(warnings.join(" / "))}">${escapeHtml(warnings.join(" / "))}</span>` : ""}
+    </div>
+    <div class="candidate-meta">
+      <span class="badge confidence-${escapeAttr(candidate?.confidence || "search")}">${escapeHtml(candidate?.confidence || entry.source)}</span>
+      <span>${escapeHtml(String(stock.total))} in stock</span>
+      <span>${price.unitPrice == null ? "price missing" : escapeHtml(formatMoney(price.unitPrice, price.currency))}</span>
+    </div>
+    <div class="candidate-actions">
+      <button type="button" class="primary-button" data-action="apply-bom-manual-match" data-id="${row.id}" data-part-id="${part.id}">${current ? "keep" : "use"}</button>
+      <button type="button" data-action="open-edit-part" data-id="${part.id}">edit part</button>
+    </div>
+  </article>`;
+}
+
+function applyManualBomMatch(rowId, partId) {
+  const row = state.inventory.projectBom.find((item) => item.id === Number(rowId));
+  const part = state.inventory.parts.find((item) => item.id === Number(partId));
+  if (!row || !part) {
+    toast("select an inventory part first", "error");
+    return;
+  }
+  row.partId = part.id;
+  row.notes = null;
+  logActivity("manual-bom-match", "project_bom", row.id, `${row.value || row.referencesText || "BOM"} -> ${part.name}`);
+  touchInventory();
+  if (!persistDatabase("manual BOM match applied", { dirty: true })) return;
+  closeModal();
+  render();
+  toast(`matched ${row.referencesText || "BOM row"} to ${part.name}`);
 }
 
 function saveBomRowFromForm(form) {
